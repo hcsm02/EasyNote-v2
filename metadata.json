@@ -1,0 +1,7 @@
+{
+  "name": "Quiet Flow",
+  "description": "A minimalist, low-fatigue personal task manager with a calm iOS-inspired aesthetic.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

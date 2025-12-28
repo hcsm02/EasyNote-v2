@@ -1,0 +1,455 @@
+
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { TimeView, Task, InputMode, AppView } from './types';
+import TimeSwitcher from './components/TimeSwitcher';
+import MainCard from './components/MainCard';
+import BottomBar from './components/BottomBar';
+import ArchiveButton from './components/ArchiveButton';
+import RevertButton from './components/RevertButton';
+import DeleteButton from './components/DeleteButton';
+import AIPlanningPanel from './components/AIPlanningPanel';
+import TaskDetailPanel from './components/TaskDetailPanel';
+import CalendarView from './components/CalendarView';
+import { GoogleGenAI, Type } from "@google/genai";
+
+const App: React.FC = () => {
+  const [tasks, setTasks] = useState<Task[]>([
+    { id: '1', text: '整理桌面文档', details: '', createdAt: Date.now(), dueDate: new Date().toISOString().split('T')[0], timeframe: TimeView.TODAY, selected: false, archived: false },
+    { id: '2', text: '预约牙医', details: '', createdAt: Date.now(), dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], timeframe: TimeView.FUTURE2, selected: false, archived: false },
+    { id: '3', text: '学习 React 新特性', details: '', createdAt: Date.now(), dueDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], timeframe: TimeView.LATER, selected: false, archived: false },
+  ]);
+  
+  const [waterCount, setWaterCount] = useState(1);
+  const waterTarget = 8;
+
+  const [currentTimeView, setCurrentTimeView] = useState<TimeView>(TimeView.TODAY);
+  const [inputMode, setInputMode] = useState<InputMode>('none');
+  const [currentAppView, setCurrentAppView] = useState<AppView>('active');
+  const [isAIPlanningOpen, setIsAIPlanningOpen] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [inputValue, setInputValue] = useState('');
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (inputMode === 'voice' && !isAIPlanningOpen && !editingTaskId) {
+      startRecording();
+    } else if (inputMode !== 'voice' && isRecording) {
+      stopRecording(false);
+    }
+  }, [inputMode, isAIPlanningOpen, editingTaskId]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioChunksRef.current.length > 0) {
+          await handleVoiceUpload(audioBlob);
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      setInputMode('none');
+    }
+  };
+
+  const stopRecording = (process: boolean = true) => {
+    if (mediaRecorderRef.current && isRecording) {
+      if (!process) audioChunksRef.current = [];
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const filteredTasks = useMemo(() => {
+    if (currentAppView === 'archived') {
+      return tasks.filter(t => t.archived);
+    }
+    return tasks.filter(t => !t.archived && t.timeframe === currentTimeView);
+  }, [tasks, currentTimeView, currentAppView]);
+
+  const toggleTaskSelection = (id: string) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, selected: !t.selected } : t));
+  };
+
+  const handleUpdateTask = (id: string, updates: Partial<Task>) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
+  const handleArchiveSelected = () => {
+    setTasks(prev => prev.map(t => t.selected && !t.archived ? { ...t, archived: true, selected: false } : t));
+  };
+
+  const handleRevertSelected = () => {
+    setTasks(prev => prev.map(t => t.selected && t.archived ? { ...t, archived: false, selected: false } : t));
+    setCurrentAppView('active');
+  };
+
+  const handleDeleteSelected = () => {
+    setTasks(prev => prev.filter(t => !t.selected));
+  };
+
+  const handleDirectAddTask = (text: string, dateISO: string) => {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const targetDate = new Date(dateISO);
+    targetDate.setHours(0,0,0,0);
+    
+    let timeframe = TimeView.LATER;
+    const diffDays = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) timeframe = TimeView.HISTORY;
+    else if (diffDays === 0) timeframe = TimeView.TODAY;
+    else if (diffDays <= 2) timeframe = TimeView.FUTURE2;
+
+    const newTask: Task = {
+      id: Math.random().toString(36).substr(2, 9),
+      text,
+      details: '',
+      createdAt: Date.now(),
+      dueDate: dateISO,
+      timeframe,
+      selected: false,
+      archived: false
+    };
+
+    setTasks(prev => [...prev, newTask]);
+  };
+
+  const handleVoiceUpload = async (audioBlob: Blob) => {
+    setIsAnalyzing(true);
+    try {
+      const base64Audio = await blobToBase64(audioBlob);
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const today = new Date();
+      const todayISO = today.toISOString().split('T')[0];
+      const todayStr = today.toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: {
+          parts: [
+            { inlineData: { data: base64Audio, mimeType: 'audio/webm' } },
+            { text: `Current Time: ${todayStr} (${todayISO}). Analyze the spoken input. Split items. For each item, identify the task and the specific date mentioned.` }
+          ]
+        },
+        config: {
+          systemInstruction: `Task Processor:
+          1. Extract 'text': THE TASK CONTENT ONLY. Remove temporal markers (e.g., remove "tomorrow", "明天", "next week", "下周").
+          2. Extract 'dueDate': YYYY-MM-DD. Calculate relative to today.
+          3. Determine 'category': 'history' (past), 'today' (today), 'future2' (tomorrow/next day), 'later' (beyond).
+          4. Set 'isArchived': true if task is stated as already finished.
+          Return JSON array.`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              items: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    text: { type: Type.STRING, description: "Actionable text WITHOUT time words" },
+                    dueDate: { type: Type.STRING, description: "ISO date YYYY-MM-DD" },
+                    category: { type: Type.STRING, enum: ['history', 'today', 'future2', 'later'] },
+                    isArchived: { type: Type.BOOLEAN }
+                  },
+                  required: ["text", "dueDate", "category", "isArchived"]
+                }
+              }
+            },
+            required: ["items"]
+          }
+        }
+      });
+
+      const result = JSON.parse(response.text || "{}");
+      if (result.items) {
+        addMultipleTasks(result.items);
+      }
+    } catch (error) {
+      console.error("AI Analysis failed:", error);
+    } finally {
+      setIsAnalyzing(false);
+      setInputMode('none');
+    }
+  };
+
+  const handleAddTask = async (text: string) => {
+    if (!text.trim() || isAnalyzing) return;
+    setIsAnalyzing(true);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const today = new Date();
+      const todayISO = today.toISOString().split('T')[0];
+      const todayStr = today.toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Today is ${todayStr} (${todayISO}). Input text: "${text}". Organize into tasks.`,
+        config: {
+          systemInstruction: `Task Extractor:
+          1. 'text': Cleaned description without time references (e.g. "Water flowers", NOT "Water flowers tomorrow").
+          2. 'dueDate': Exact date YYYY-MM-DD.
+          3. 'category': Based on dueDate relative to today.
+          4. 'isArchived': Boolean.
+          Return JSON array.`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              items: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    text: { type: Type.STRING },
+                    dueDate: { type: Type.STRING },
+                    category: { type: Type.STRING, enum: ['history', 'today', 'future2', 'later'] },
+                    isArchived: { type: Type.BOOLEAN }
+                  },
+                  required: ["text", "dueDate", "category", "isArchived"]
+                }
+              }
+            },
+            required: ["items"]
+          }
+        }
+      });
+      const result = JSON.parse(response.text || "{}");
+      if (result.items) {
+        addMultipleTasks(result.items);
+      }
+    } catch (e) { console.error(e); } finally {
+      setIsAnalyzing(false);
+      setInputValue('');
+      setInputMode('none');
+    }
+  };
+
+  const addMultipleTasks = (items: Array<{text: string, dueDate: string, category: string, isArchived: boolean}>) => {
+    const newTasks: Task[] = items.map(item => ({
+        id: Math.random().toString(36).substr(2, 9),
+        text: item.text,
+        details: '',
+        createdAt: Date.now(),
+        dueDate: item.dueDate,
+        timeframe: item.category as TimeView,
+        selected: false,
+        archived: item.isArchived
+    }));
+
+    setTasks(prev => [...prev, ...newTasks]);
+    
+    const pendingItems = items.filter(i => !i.isArchived);
+    if (pendingItems.length > 0) {
+      setCurrentTimeView(pendingItems[0].category as TimeView);
+      setCurrentAppView('active');
+    } else if (items.length > 0) {
+      setCurrentAppView('archived');
+    }
+  };
+
+  const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const formattedDate = currentTime.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/');
+  const weekday = currentTime.toLocaleDateString('en-US', { weekday: 'short' });
+
+  const activeEditingTask = tasks.find(t => t.id === editingTaskId);
+
+  return (
+    <div className="h-screen max-w-md mx-auto flex flex-col px-5 pt-5 pb-24 transition-all duration-300 overflow-hidden relative">
+      
+      {/* Header Widgets */}
+      <div className="flex gap-4 mb-5">
+        <div className="nm-raised rounded-[24px] p-4 flex-1 flex flex-col items-center justify-center relative group">
+          <button 
+            onClick={() => setIsAIPlanningOpen(true)}
+            className="absolute top-2 right-2 w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center text-indigo-400 hover:text-indigo-600 transition-all z-10 hover:scale-110 active:nm-inset"
+            title="AI Assisted Organization"
+          >
+            <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+          </button>
+          <div className="text-3xl font-light text-gray-700 mb-1">{formattedTime}</div>
+          <div className="text-[10px] text-gray-400 font-bold tracking-tight">{formattedDate} {weekday}</div>
+        </div>
+        <div className="nm-raised rounded-[24px] p-4 w-32 flex flex-col justify-between">
+          <div className="flex items-center gap-2 mb-1">
+            <svg className="w-4 h-4 text-[#34749D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 21a6 6 0 006-6c0-4-6-11-6-11s-6 7-6 11a6 6 0 006 6z" />
+            </svg>
+            <div className="text-[10px] font-bold text-gray-500">
+              <span className="text-gray-700">{waterCount}</span>/{waterTarget}
+            </div>
+          </div>
+          <div className="flex gap-2 mt-auto">
+            <button onClick={() => setWaterCount(Math.max(0, waterCount - 1))} className="nm-inset-sm w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-gray-400 active:nm-inset-active transition-all">-</button>
+            <button onClick={() => setWaterCount(Math.min(waterTarget, waterCount + 1))} className="nm-inset-sm w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-gray-400 active:nm-inset-active transition-all">+</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative flex-1 flex flex-col overflow-visible mb-4">
+        {currentAppView === 'active' ? (
+          <div className="flex flex-col flex-1">
+            <MainCard 
+              tasks={filteredTasks} 
+              onToggle={toggleTaskSelection} 
+              onEdit={setEditingTaskId}
+              switcher={<TimeSwitcher active={currentTimeView} onSwitch={setCurrentTimeView} />} 
+            />
+          </div>
+        ) : currentAppView === 'archived' ? (
+          <MainCard 
+            tasks={filteredTasks} 
+            onToggle={toggleTaskSelection} 
+            onEdit={setEditingTaskId}
+            title="存档历史" 
+          />
+        ) : (
+          <CalendarView 
+            tasks={tasks} 
+            onToggle={toggleTaskSelection} 
+            onEdit={setEditingTaskId} 
+            onAddTask={handleDirectAddTask}
+          />
+        )}
+        
+        {/* Floating action buttons */}
+        <div className="absolute bottom-6 right-4 animate-in zoom-in duration-300 z-10 flex flex-col gap-3">
+          {filteredTasks.some(t => t.selected) && (
+            <>
+              {currentAppView === 'active' && <ArchiveButton onClick={handleArchiveSelected} />}
+              {currentAppView === 'archived' && <RevertButton onClick={handleRevertSelected} />}
+              <DeleteButton onClick={handleDeleteSelected} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Input Overlay */}
+      {inputMode !== 'none' && !isAIPlanningOpen && !editingTaskId && (
+        <div className="fixed inset-x-0 bottom-24 px-5 mb-2 animate-in slide-in-from-bottom-2 duration-300 z-[60]">
+          <div className="nm-raised rounded-[24px] p-5 flex items-center gap-4">
+            <div className="flex-grow flex items-center">
+              {inputMode === 'voice' ? (
+                <div className="flex items-center gap-3 text-gray-500">
+                  <div className={`w-3 h-3 rounded-full bg-red-400 ${isRecording ? 'animate-pulse' : ''} shadow-[0_0_10px_rgba(248,113,113,0.5)]`}></div>
+                  <span className="text-sm font-semibold tracking-tight text-gray-600">
+                    {isAnalyzing ? "AI 正在理解..." : "请说话..."}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center w-full gap-2">
+                  <input 
+                    autoFocus
+                    className="flex-grow bg-transparent text-gray-700 placeholder-gray-400 text-sm font-medium"
+                    placeholder={isAnalyzing ? "正在记录..." : "输入新事项..."}
+                    value={inputValue}
+                    disabled={isAnalyzing}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddTask(inputValue)}
+                  />
+                  {!isAnalyzing && (
+                    <button 
+                      onClick={() => setInputMode('voice')}
+                      className="nm-raised-sm w-8 h-8 rounded-lg flex items-center justify-center text-[#34749D] opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            <button 
+              onClick={() => inputMode === 'voice' ? stopRecording() : handleAddTask(inputValue)}
+              disabled={isAnalyzing}
+              className={`nm-raised-sm w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                isAnalyzing ? 'opacity-50' : 'text-[#34749D] active:nm-inset-active'
+              }`}
+            >
+              {isAnalyzing ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : inputMode === 'voice' ? (
+                <div className="w-3 h-3 bg-red-500 rounded-sm"></div>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI Planning Modal Panel */}
+      {isAIPlanningOpen && (
+        <AIPlanningPanel 
+          onClose={() => setIsAIPlanningOpen(false)} 
+          onAddTasks={(items) => {
+            addMultipleTasks(items);
+            setIsAIPlanningOpen(false);
+          }}
+        />
+      )}
+
+      {/* Task Detail Panel (Edit Page) */}
+      {activeEditingTask && (
+        <TaskDetailPanel
+          task={activeEditingTask}
+          onClose={() => setEditingTaskId(null)}
+          onUpdate={(updates) => handleUpdateTask(activeEditingTask.id, updates)}
+        />
+      )}
+
+      <BottomBar 
+        activeMode={inputMode} 
+        onModeSwitch={setInputMode} 
+        activeAppView={currentAppView}
+        onAppViewSwitch={setCurrentAppView}
+      />
+    </div>
+  );
+};
+
+export default App;
