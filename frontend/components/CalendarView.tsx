@@ -2,15 +2,29 @@
 import React, { useState, useMemo } from 'react';
 import { Task, TimeView } from '../types';
 import TaskItem from './TaskItem';
+import ArchiveButton from './ArchiveButton';
+import RevertButton from './RevertButton';
+import DeleteButton from './DeleteButton';
 
 interface CalendarViewProps {
   tasks: Task[];
   onToggle: (id: string) => void;
   onEdit: (id: string) => void;
   onAddTask: (text: string, date: string) => void;
+  onArchive: () => void;    // 归档选中任务
+  onRevert: () => void;     // 反归档选中任务
+  onDelete: () => void;     // 删除选中任务
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, onAddTask }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({
+  tasks,
+  onToggle,
+  onEdit,
+  onAddTask,
+  onArchive,
+  onRevert,
+  onDelete
+}) => {
   const [viewDate, setViewDate] = useState(new Date());
   const [selectedDayISO, setSelectedDayISO] = useState<string | null>(null);
   const [quickInput, setQuickInput] = useState('');
@@ -63,9 +77,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
         <button
           key={d}
           onClick={() => setSelectedDayISO(dateStr)}
-          className={`h-14 w-full flex flex-col items-center justify-center rounded-2xl relative transition-all duration-300 ${
-            isToday ? 'nm-inset-sm text-indigo-500' : 'hover:nm-raised-sm text-gray-600'
-          }`}
+          className={`h-14 w-full flex flex-col items-center justify-center rounded-2xl relative transition-all duration-300 ${isToday ? 'nm-inset-sm text-indigo-500' : 'hover:nm-raised-sm text-gray-600'
+            }`}
         >
           <span className="text-xs font-bold">{d}</span>
           <div className="flex gap-0.5 mt-1 h-1">
@@ -83,9 +96,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
 
   if (selectedDayISO) {
     return (
-      <div className="nm-raised rounded-[32px] p-5 flex-1 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+      <div className="nm-raised rounded-[32px] p-5 flex-1 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300 relative">
         <div className="flex items-center mb-6">
-          <button 
+          <button
             onClick={() => setSelectedDayISO(null)}
             className="w-10 h-10 nm-raised rounded-full flex items-center justify-center text-gray-400 mr-4 active:nm-inset"
           >
@@ -102,7 +115,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
         {/* Quick Add Form */}
         <form onSubmit={handleQuickAdd} className="mb-6 flex gap-3">
           <div className="flex-1 nm-inset-sm rounded-2xl px-4 py-2 flex items-center">
-            <input 
+            <input
               autoFocus
               className="w-full bg-transparent text-xs font-semibold text-gray-600 focus:outline-none placeholder-gray-300"
               placeholder="快速添加事项..."
@@ -110,7 +123,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
               onChange={(e) => setQuickInput(e.target.value)}
             />
           </div>
-          <button 
+          <button
             type="submit"
             disabled={!quickInput.trim()}
             className="w-10 h-10 nm-raised rounded-full flex items-center justify-center text-indigo-400 disabled:opacity-30 active:nm-inset transition-all"
@@ -121,7 +134,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
           </button>
         </form>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-4">
+        <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-4 relative">
           {selectedDayTasks.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-300 py-10">
               <div className="w-1 h-1 bg-gray-200 rounded-full mb-2"></div>
@@ -129,15 +142,31 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
             </div>
           ) : (
             selectedDayTasks.map(task => (
-              <TaskItem 
-                key={task.id} 
-                task={task} 
-                onToggle={() => onToggle(task.id)} 
-                onEdit={() => onEdit(task.id)} 
+              <TaskItem
+                key={task.id}
+                task={task}
+                onToggle={() => onToggle(task.id)}
+                onEdit={() => onEdit(task.id)}
               />
             ))
           )}
         </div>
+
+        {/* 操作按钮 - 当有选中任务时显示 */}
+        {selectedDayTasks.some(t => t.selected) && (
+          <div className="absolute bottom-6 right-4 animate-in zoom-in duration-300 z-10 flex flex-col gap-3">
+            {/* 归档按钮 - 只有未归档的任务才显示 */}
+            {selectedDayTasks.some(t => t.selected && !t.archived) && (
+              <ArchiveButton onClick={onArchive} />
+            )}
+            {/* 反归档按钮 - 只有已归档的任务才显示 */}
+            {selectedDayTasks.some(t => t.selected && t.archived) && (
+              <RevertButton onClick={onRevert} />
+            )}
+            {/* 删除按钮 - 始终显示 */}
+            <DeleteButton onClick={onDelete} />
+          </div>
+        )}
       </div>
     );
   }
@@ -154,7 +183,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, onToggle, onEdit, on
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" strokeWidth="3" /></svg>
           </button>
         </div>
-        
+
         <div className="flex gap-3">
           <div className="nm-raised px-4 py-2 rounded-2xl flex items-center gap-2">
             <span className="text-xs font-bold text-gray-600 tracking-tight">{monthName}</span>

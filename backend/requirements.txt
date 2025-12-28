@@ -1,0 +1,30 @@
+# Python 依赖
+# 运行: pip install -r requirements.txt
+
+# Web 框架
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# 数据库
+sqlalchemy==2.0.36
+
+# 数据验证
+pydantic==2.10.3
+pydantic-settings==2.7.0
+email-validator==2.3.0
+
+# 认证
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# 工具
+python-dotenv==1.0.1
+python-multipart==0.0.18
+
+# 开发测试
+pytest==8.3.4
+httpx==0.28.1
+
+# AI (多平台支持)
+google-generativeai==0.8.3
+openai==1.58.1

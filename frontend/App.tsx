@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { TimeView, Task, InputMode, AppView } from './types';
 import TimeSwitcher from './components/TimeSwitcher';
 import MainCard from './components/MainCard';
@@ -10,15 +10,15 @@ import DeleteButton from './components/DeleteButton';
 import AIPlanningPanel from './components/AIPlanningPanel';
 import TaskDetailPanel from './components/TaskDetailPanel';
 import CalendarView from './components/CalendarView';
-import { GoogleGenAI, Type } from "@google/genai";
+import AIProviderSelector from './components/AIProviderSelector';
+import { parseTasksFromText, parseTasksFromAudio } from './services/api';
+import { getAllTasks, saveAllTasks, isIndexedDBAvailable } from './services/storage';
 
 const App: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: '1', text: '整理桌面文档', details: '', createdAt: Date.now(), dueDate: new Date().toISOString().split('T')[0], timeframe: TimeView.TODAY, selected: false, archived: false },
-    { id: '2', text: '预约牙医', details: '', createdAt: Date.now(), dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], timeframe: TimeView.FUTURE2, selected: false, archived: false },
-    { id: '3', text: '学习 React 新特性', details: '', createdAt: Date.now(), dueDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], timeframe: TimeView.LATER, selected: false, archived: false },
-  ]);
-  
+  // 任务状态 - 初始为空，从本地存储加载
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
   const [waterCount, setWaterCount] = useState(1);
   const waterTarget = 8;
 
@@ -31,14 +31,75 @@ const App: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  
+  const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
+  const [isAIAvailable, setIsAIAvailable] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // 从本地存储加载任务
+  useEffect(() => {
+    const loadTasks = async () => {
+      if (!isIndexedDBAvailable()) {
+        console.warn('IndexedDB 不可用，数据将无法持久化');
+        setIsDataLoaded(true);
+        return;
+      }
+      try {
+        const storedTasks = await getAllTasks();
+        if (storedTasks.length > 0) {
+          setTasks(storedTasks);
+        }
+      } catch (error) {
+        console.error('加载任务失败:', error);
+      } finally {
+        setIsDataLoaded(true);
+      }
+    };
+    loadTasks();
+  }, []);
+
+  // 数据变化时自动保存
+  useEffect(() => {
+    // 只有在数据加载完成后才保存，避免覆盖本地数据
+    if (!isDataLoaded) return;
+
+    const saveTasks = async () => {
+      try {
+        await saveAllTasks(tasks);
+      } catch (error) {
+        console.error('保存任务失败:', error);
+      }
+    };
+    saveTasks();
+  }, [tasks, isDataLoaded]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // 检测 AI 是否可用
+  useEffect(() => {
+    const checkAIStatus = async () => {
+      try {
+        const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+        const response = await fetch(`${API_BASE}/ai/providers`);
+        if (response.ok) {
+          const data = await response.json();
+          const selectedProvider = localStorage.getItem('aiProvider') || data.current;
+          const provider = data.providers.find((p: any) => p.id === selectedProvider);
+          setIsAIAvailable(provider?.available || false);
+        }
+      } catch {
+        setIsAIAvailable(false);
+      }
+    };
+    checkAIStatus();
+    // 每30秒检查一次
+    const interval = setInterval(checkAIStatus, 30000);
+    return () => clearInterval(interval);
+  }, [isAISettingsOpen]); // 在设置面板关闭后重新检查
 
   useEffect(() => {
     if (inputMode === 'voice' && !isAIPlanningOpen && !editingTaskId) {
@@ -125,13 +186,13 @@ const App: React.FC = () => {
 
   const handleDirectAddTask = (text: string, dateISO: string) => {
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
     const targetDate = new Date(dateISO);
-    targetDate.setHours(0,0,0,0);
-    
+    targetDate.setHours(0, 0, 0, 0);
+
     let timeframe = TimeView.LATER;
     const diffDays = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    
+
     if (diffDays < 0) timeframe = TimeView.HISTORY;
     else if (diffDays === 0) timeframe = TimeView.TODAY;
     else if (diffDays <= 2) timeframe = TimeView.FUTURE2;
@@ -154,52 +215,10 @@ const App: React.FC = () => {
     setIsAnalyzing(true);
     try {
       const base64Audio = await blobToBase64(audioBlob);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const today = new Date();
-      const todayISO = today.toISOString().split('T')[0];
-      const todayStr = today.toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [
-            { inlineData: { data: base64Audio, mimeType: 'audio/webm' } },
-            { text: `Current Time: ${todayStr} (${todayISO}). Analyze the spoken input. Split items. For each item, identify the task and the specific date mentioned.` }
-          ]
-        },
-        config: {
-          systemInstruction: `Task Processor:
-          1. Extract 'text': THE TASK CONTENT ONLY. Remove temporal markers (e.g., remove "tomorrow", "明天", "next week", "下周").
-          2. Extract 'dueDate': YYYY-MM-DD. Calculate relative to today.
-          3. Determine 'category': 'history' (past), 'today' (today), 'future2' (tomorrow/next day), 'later' (beyond).
-          4. Set 'isArchived': true if task is stated as already finished.
-          Return JSON array.`,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              items: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    text: { type: Type.STRING, description: "Actionable text WITHOUT time words" },
-                    dueDate: { type: Type.STRING, description: "ISO date YYYY-MM-DD" },
-                    category: { type: Type.STRING, enum: ['history', 'today', 'future2', 'later'] },
-                    isArchived: { type: Type.BOOLEAN }
-                  },
-                  required: ["text", "dueDate", "category", "isArchived"]
-                }
-              }
-            },
-            required: ["items"]
-          }
-        }
-      });
-
-      const result = JSON.parse(response.text || "{}");
-      if (result.items) {
-        addMultipleTasks(result.items);
+      // 调用后端 AI API
+      const items = await parseTasksFromAudio(base64Audio, 'audio/webm');
+      if (items.length > 0) {
+        addMultipleTasks(items);
       }
     } catch (error) {
       console.error("AI Analysis failed:", error);
@@ -212,70 +231,36 @@ const App: React.FC = () => {
   const handleAddTask = async (text: string) => {
     if (!text.trim() || isAnalyzing) return;
     setIsAnalyzing(true);
-    
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const today = new Date();
-      const todayISO = today.toISOString().split('T')[0];
-      const todayStr = today.toLocaleDateString('zh-CN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Today is ${todayStr} (${todayISO}). Input text: "${text}". Organize into tasks.`,
-        config: {
-          systemInstruction: `Task Extractor:
-          1. 'text': Cleaned description without time references (e.g. "Water flowers", NOT "Water flowers tomorrow").
-          2. 'dueDate': Exact date YYYY-MM-DD.
-          3. 'category': Based on dueDate relative to today.
-          4. 'isArchived': Boolean.
-          Return JSON array.`,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              items: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    text: { type: Type.STRING },
-                    dueDate: { type: Type.STRING },
-                    category: { type: Type.STRING, enum: ['history', 'today', 'future2', 'later'] },
-                    isArchived: { type: Type.BOOLEAN }
-                  },
-                  required: ["text", "dueDate", "category", "isArchived"]
-                }
-              }
-            },
-            required: ["items"]
-          }
-        }
-      });
-      const result = JSON.parse(response.text || "{}");
-      if (result.items) {
-        addMultipleTasks(result.items);
+    try {
+      // 调用后端 AI API
+      const items = await parseTasksFromText(text);
+      if (items.length > 0) {
+        addMultipleTasks(items);
       }
-    } catch (e) { console.error(e); } finally {
+    } catch (e) {
+      console.error(e);
+    } finally {
       setIsAnalyzing(false);
       setInputValue('');
       setInputMode('none');
     }
   };
 
-  const addMultipleTasks = (items: Array<{text: string, dueDate: string, category: string, isArchived: boolean}>) => {
+  const addMultipleTasks = (items: Array<{ text: string, dueDate: string, category: string, isArchived: boolean }>) => {
     const newTasks: Task[] = items.map(item => ({
-        id: Math.random().toString(36).substr(2, 9),
-        text: item.text,
-        details: '',
-        createdAt: Date.now(),
-        dueDate: item.dueDate,
-        timeframe: item.category as TimeView,
-        selected: false,
-        archived: item.isArchived
+      id: Math.random().toString(36).substr(2, 9),
+      text: item.text,
+      details: '',
+      createdAt: Date.now(),
+      dueDate: item.dueDate,
+      timeframe: item.category as TimeView,
+      selected: false,
+      archived: item.isArchived
     }));
 
     setTasks(prev => [...prev, ...newTasks]);
-    
+
     const pendingItems = items.filter(i => !i.isArchived);
     if (pendingItems.length > 0) {
       setCurrentTimeView(pendingItems[0].category as TimeView);
@@ -293,17 +278,31 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen max-w-md mx-auto flex flex-col px-5 pt-5 pb-24 transition-all duration-300 overflow-hidden relative">
-      
+
       {/* Header Widgets */}
       <div className="flex gap-4 mb-5">
         <div className="nm-raised rounded-[24px] p-4 flex-1 flex flex-col items-center justify-center relative group">
-          <button 
+          <button
             onClick={() => setIsAIPlanningOpen(true)}
-            className="absolute top-2 right-2 w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center text-indigo-400 hover:text-indigo-600 transition-all z-10 hover:scale-110 active:nm-inset"
-            title="AI Assisted Organization"
+            disabled={!isAIAvailable}
+            className={`absolute top-2 right-2 w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center transition-all z-10 hover:scale-110 active:nm-inset ${isAIAvailable
+              ? 'text-indigo-400 hover:text-indigo-600'
+              : 'text-gray-300 cursor-not-allowed'
+              }`}
+            title={isAIAvailable ? 'AI 智能规划' : 'AI 未配置，请点击左侧设置'}
           >
-            <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 ${isAIAvailable ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setIsAISettingsOpen(true)}
+            className="absolute top-2 left-2 w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center text-gray-400 hover:text-indigo-500 transition-all z-10 hover:scale-110 active:nm-inset"
+            title="AI 模型设置"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
           <div className="text-3xl font-light text-gray-700 mb-1">{formattedTime}</div>
@@ -312,7 +311,7 @@ const App: React.FC = () => {
         <div className="nm-raised rounded-[24px] p-4 w-32 flex flex-col justify-between">
           <div className="flex items-center gap-2 mb-1">
             <svg className="w-4 h-4 text-[#34749D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 21a6 6 0 006-6c0-4-6-11-6-11s-6 7-6 11a6 6 0 006 6z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 21a6 6 0 006-6c0-4-6-11-6-11s-6 7-6 11a6 6 0 006 6z" />
             </svg>
             <div className="text-[10px] font-bold text-gray-500">
               <span className="text-gray-700">{waterCount}</span>/{waterTarget}
@@ -329,29 +328,32 @@ const App: React.FC = () => {
       <div className="relative flex-1 flex flex-col overflow-visible mb-4">
         {currentAppView === 'active' ? (
           <div className="flex flex-col flex-1">
-            <MainCard 
-              tasks={filteredTasks} 
-              onToggle={toggleTaskSelection} 
+            <MainCard
+              tasks={filteredTasks}
+              onToggle={toggleTaskSelection}
               onEdit={setEditingTaskId}
-              switcher={<TimeSwitcher active={currentTimeView} onSwitch={setCurrentTimeView} />} 
+              switcher={<TimeSwitcher active={currentTimeView} onSwitch={setCurrentTimeView} />}
             />
           </div>
         ) : currentAppView === 'archived' ? (
-          <MainCard 
-            tasks={filteredTasks} 
-            onToggle={toggleTaskSelection} 
+          <MainCard
+            tasks={filteredTasks}
+            onToggle={toggleTaskSelection}
             onEdit={setEditingTaskId}
-            title="存档历史" 
+            title="存档历史"
           />
         ) : (
-          <CalendarView 
-            tasks={tasks} 
-            onToggle={toggleTaskSelection} 
-            onEdit={setEditingTaskId} 
+          <CalendarView
+            tasks={tasks}
+            onToggle={toggleTaskSelection}
+            onEdit={setEditingTaskId}
             onAddTask={handleDirectAddTask}
+            onArchive={handleArchiveSelected}
+            onRevert={handleRevertSelected}
+            onDelete={handleDeleteSelected}
           />
         )}
-        
+
         {/* Floating action buttons */}
         <div className="absolute bottom-6 right-4 animate-in zoom-in duration-300 z-10 flex flex-col gap-3">
           {filteredTasks.some(t => t.selected) && (
@@ -366,7 +368,7 @@ const App: React.FC = () => {
 
       {/* Input Overlay */}
       {inputMode !== 'none' && !isAIPlanningOpen && !editingTaskId && (
-        <div className="fixed inset-x-0 bottom-24 px-5 mb-2 animate-in slide-in-from-bottom-2 duration-300 z-[60]">
+        <div className="fixed inset-x-0 bottom-24 px-5 mb-2 animate-in slide-in-from-bottom-2 duration-300 z-[60] max-w-md mx-auto">
           <div className="nm-raised rounded-[24px] p-5 flex items-center gap-4">
             <div className="flex-grow flex items-center">
               {inputMode === 'voice' ? (
@@ -377,18 +379,31 @@ const App: React.FC = () => {
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center w-full gap-2">
-                  <input 
+                <div className="flex items-start w-full gap-2">
+                  <textarea
                     autoFocus
-                    className="flex-grow bg-transparent text-gray-700 placeholder-gray-400 text-sm font-medium"
+                    rows={1}
+                    className="flex-grow bg-transparent text-gray-700 placeholder-gray-400 text-sm font-medium resize-none overflow-hidden leading-relaxed focus:outline-none"
+                    style={{ minHeight: '24px', maxHeight: '120px' }}
                     placeholder={isAnalyzing ? "正在记录..." : "输入新事项..."}
                     value={inputValue}
                     disabled={isAnalyzing}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTask(inputValue)}
+                    onChange={(e) => {
+                      setInputValue(e.target.value);
+                      // 自动调整高度
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                    }}
+                    onKeyDown={(e) => {
+                      // Shift+Enter 换行，Enter 提交
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddTask(inputValue);
+                      }
+                    }}
                   />
                   {!isAnalyzing && (
-                    <button 
+                    <button
                       onClick={() => setInputMode('voice')}
                       className="nm-raised-sm w-8 h-8 rounded-lg flex items-center justify-center text-[#34749D] opacity-60 hover:opacity-100 transition-opacity"
                     >
@@ -400,13 +415,12 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-            
-            <button 
+
+            <button
               onClick={() => inputMode === 'voice' ? stopRecording() : handleAddTask(inputValue)}
               disabled={isAnalyzing}
-              className={`nm-raised-sm w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-                isAnalyzing ? 'opacity-50' : 'text-[#34749D] active:nm-inset-active'
-              }`}
+              className={`nm-raised-sm w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isAnalyzing ? 'opacity-50' : 'text-[#34749D] active:nm-inset-active'
+                }`}
             >
               {isAnalyzing ? (
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -424,8 +438,8 @@ const App: React.FC = () => {
 
       {/* AI Planning Modal Panel */}
       {isAIPlanningOpen && (
-        <AIPlanningPanel 
-          onClose={() => setIsAIPlanningOpen(false)} 
+        <AIPlanningPanel
+          onClose={() => setIsAIPlanningOpen(false)}
           onAddTasks={(items) => {
             addMultipleTasks(items);
             setIsAIPlanningOpen(false);
@@ -442,9 +456,14 @@ const App: React.FC = () => {
         />
       )}
 
-      <BottomBar 
-        activeMode={inputMode} 
-        onModeSwitch={setInputMode} 
+      {/* AI Provider Settings */}
+      {isAISettingsOpen && (
+        <AIProviderSelector onClose={() => setIsAISettingsOpen(false)} />
+      )}
+
+      <BottomBar
+        activeMode={inputMode}
+        onModeSwitch={setInputMode}
         activeAppView={currentAppView}
         onAppViewSwitch={setCurrentAppView}
       />
