@@ -20,14 +20,25 @@ class Settings(BaseSettings):
     
     # 应用配置
     DEBUG: bool = False
-    ALLOWED_ORIGINS: str = "http://localhost:3000"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
     
     # AI 配置 - 支持多平台动态切换
     # 每个平台独立配置 API Key
     GEMINI_API_KEY: str = ""
+    GEMINI_BASE_URL: str = ""  # 可选，用于代理
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    
     SILICONFLOW_API_KEY: str = ""
+    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    SILICONFLOW_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    
     DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-chat"
     
     # 默认提供商（前端未选择时使用）
     AI_DEFAULT_PROVIDER: str = "siliconflow"

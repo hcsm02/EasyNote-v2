@@ -1,0 +1,17 @@
+{
+    "name": "EasyNote v2",
+    "short_name": "EasyNote",
+    "description": "智能、极简、新拟态任务管理应用",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#F0F0E8",
+    "theme_color": "#F0F0E8",
+    "icons": [
+        {
+            "src": "/easynote-icon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}

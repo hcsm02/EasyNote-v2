@@ -12,67 +12,63 @@ settings = get_settings()
 
 # ==================== 默认配置 ====================
 
-# 各平台默认配置
-PROVIDER_DEFAULTS = {
-    "gemini": {
-        "base_url": None,
-        "model": "gemini-2.0-flash",
-    },
-    "openai": {
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
-    },
-    "siliconflow": {
-        "base_url": "https://api.siliconflow.cn/v1",
-        "model": "Qwen/Qwen2.5-7B-Instruct",
-    },
-    "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-    },
-}
-
-# API Key 映射
-API_KEY_MAP = {
-    "gemini": lambda: settings.GEMINI_API_KEY,
-    "openai": lambda: settings.OPENAI_API_KEY,
-    "siliconflow": lambda: settings.SILICONFLOW_API_KEY,
-    "deepseek": lambda: settings.DEEPSEEK_API_KEY,
-}
-
-
+# ==================== 动态配置 ====================
+# 使用 settings 中的配置，支持环境变量覆盖
 def get_ai_config(provider: Optional[str] = None) -> dict:
     """
     获取指定提供商的 AI 配置
-    
-    Args:
-        provider: 指定的提供商，如果为 None 则使用默认
     """
     # 使用指定的或默认的提供商
     provider = (provider or settings.AI_DEFAULT_PROVIDER).lower()
     
-    # 获取该提供商的 API Key
-    api_key_getter = API_KEY_MAP.get(provider)
-    api_key = api_key_getter() if api_key_getter else ""
+    # 根据提供商获取配置
+    if provider == "gemini":
+        return {
+            "provider": "gemini",
+            "api_key": settings.GEMINI_API_KEY,
+            "model": settings.GEMINI_MODEL,
+            "base_url": settings.GEMINI_BASE_URL,
+        }
+    elif provider == "openai":
+        return {
+            "provider": "openai",
+            "api_key": settings.OPENAI_API_KEY,
+            "model": settings.OPENAI_MODEL,
+            "base_url": settings.OPENAI_BASE_URL,
+        }
+    elif provider == "siliconflow":
+        return {
+            "provider": "siliconflow",
+            "api_key": settings.SILICONFLOW_API_KEY,
+            "model": settings.SILICONFLOW_MODEL,
+            "base_url": settings.SILICONFLOW_BASE_URL,
+        }
+    elif provider == "deepseek":
+        return {
+            "provider": "deepseek",
+            "api_key": settings.DEEPSEEK_API_KEY,
+            "model": settings.DEEPSEEK_MODEL,
+            "base_url": settings.DEEPSEEK_BASE_URL,
+        }
     
-    # 获取默认配置
-    defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS["gemini"])
-    
+    # 兜底返回 (默认 Gemini)
     return {
-        "provider": provider,
-        "api_key": api_key,
-        "model": defaults["model"],
-        "base_url": defaults["base_url"],
+        "provider": "gemini",
+        "api_key": settings.GEMINI_API_KEY,
+        "model": settings.GEMINI_MODEL,
+        "base_url": settings.GEMINI_BASE_URL,
     }
 
 
 def get_available_providers() -> List[dict]:
     """获取所有已配置 API Key 的可用提供商"""
+    # 统一列表
+    providers = ["gemini", "openai", "siliconflow", "deepseek"]
     available = []
-    for provider_id in PROVIDER_DEFAULTS.keys():
-        config = get_ai_config(provider_id)
+    for p_id in providers:
+        config = get_ai_config(p_id)
         available.append({
-            "id": provider_id,
+            "id": p_id,
             "available": bool(config["api_key"]),
             "model": config["model"],
         })
@@ -85,7 +81,15 @@ def call_gemini(prompt: str, config: dict) -> str:
     """调用 Google Gemini API"""
     import google.generativeai as genai
     
-    genai.configure(api_key=config["api_key"])
+    # 如果配置了 base_url，则使用 client_options 配置端点
+    # 注意：google-generativeai 库的 api_endpoint 通常不需要 https://
+    client_kwargs = {"api_key": config["api_key"]}
+    if config.get("base_url"):
+        endpoint = config["base_url"].replace("https://", "").replace("http://", "").split("/")[0]
+        from google.api_core import client_options
+        client_kwargs["client_options"] = client_options.ClientOptions(api_endpoint=endpoint)
+    
+    genai.configure(**client_kwargs)
     model = genai.GenerativeModel(config["model"])
     
     response = model.generate_content(
@@ -101,7 +105,13 @@ def call_gemini_with_audio(audio_base64: str, mime_type: str, prompt: str, confi
     """调用 Gemini API 处理音频"""
     import google.generativeai as genai
     
-    genai.configure(api_key=config["api_key"])
+    client_kwargs = {"api_key": config["api_key"]}
+    if config.get("base_url"):
+        endpoint = config["base_url"].replace("https://", "").replace("http://", "").split("/")[0]
+        from google.api_core import client_options
+        client_kwargs["client_options"] = client_options.ClientOptions(api_endpoint=endpoint)
+    
+    genai.configure(**client_kwargs)
     model = genai.GenerativeModel(config["model"])
     
     response = model.generate_content(
@@ -199,7 +209,7 @@ async def parse_tasks_from_text(text: str, today_iso: str, today_str: str, provi
 1. text: 只保留任务内容，移除时间词语（如"今天开发应用" → "开发应用"）
 2. dueDate: 必须是 YYYY-MM-DD 格式
 3. category: 根据 dueDate 判断 - 'today'(今天) / 'future2'(1-2天内) / 'later'(更远) / 'history'(过去)
-4. isArchived: 任务是否已完成，默认 false
+4. isArchived: 状态识别。仅当任务描述明确表示已完成（如使用了“了”、“过”、“完成”、“Done”）时设为 true。注意：即使 dueDate 是过去的时间（如“前天”），如果描述是“打算”、“还没做”、“要做”，isArchived 仍应为 false（表示逾期未完成）。
 
 严格返回 JSON:
 {{"items": [{{"text": "任务内容", "dueDate": "YYYY-MM-DD", "category": "today", "isArchived": false}}]}}"""
@@ -222,7 +232,7 @@ Task Processor Rules:
 1. Extract 'text': Task content only, remove temporal markers.
 2. Extract 'dueDate': YYYY-MM-DD, calculate relative to today.
 3. Determine 'category': 'history'/'today'/'future2'/'later'.
-4. Set 'isArchived': true if stated as finished.
+4. Set 'isArchived': true ONLY if the input describes a completed action. Past dates (e.g., "Two days ago I planned to...") do NOT automatically mean isArchived is true if the action itself wasn't finished.
 
 Return JSON: {{"items": [{{"text": "...", "dueDate": "YYYY-MM-DD", "category": "today|future2|later|history", "isArchived": false}}]}}"""
 
@@ -256,3 +266,92 @@ Return JSON:
     except Exception as e:
         print(f"AI 规划失败: {e}")
         return {"analysis": f"抱歉，AI 处理出错: {str(e)}", "items": []}
+
+
+async def chat_with_ai(messages: List[dict], task_context: dict, provider: Optional[str] = None) -> str:
+    """与 AI 助手聊天"""
+    
+    # 构建上下文 Prompt
+    title = task_context.get("title", "未命名任务")
+    details = task_context.get("details", "")
+    
+    system_instruction = f"""你是一个高效的任务管理助手。
+当前任务标题: "{title}"
+当前任务详情: "{details}"
+请根据以上上下文，简洁、专业地回答用户的提问。保持与用户相同的语言。"""
+
+    # 简单处理：将对话历史拼接为单个 Prompt
+    history_str = ""
+    for msg in messages:
+        role = "用户" if msg["role"] == "user" else "AI"
+        history_str += f"{role}: {msg['text']}\n"
+    
+    full_prompt = f"{system_instruction}\n\n当前对话历史：\n{history_str}\n请回答用户的最新问题。"
+    
+    try:
+        return call_ai(full_prompt, provider)
+    except Exception as e:
+        print(f"AI 聊天失败: {e}")
+        return f"Error: {str(e)}"
+
+
+async def format_notes(text: str, provider: Optional[str] = None) -> str:
+    """美化并结构化笔记内容"""
+    if not text.strip():
+        return ""
+        
+    prompt = f"""请美化并结构化以下笔记内容。
+核心规则：
+1. 保持原语言：输入是中文则输出中文，输入是英文则输出英文。绝对不要进行翻译。
+2. 结构化：使用 Markdown（粗体、列表、标题）使其清晰易读。
+3. 简洁专业：去除冗余，保持逻辑清晰。
+
+笔记内容：
+"{text}"
+"""
+    try:
+        return call_ai(prompt, provider)
+    except Exception as e:
+        print(f"AI 格式化失败: {e}")
+        return text
+
+
+    try:
+        return call_ai_with_audio(audio_base64, mime_type, prompt, provider)
+    except Exception as e:
+        print(f"AI 语音转录失败: {e}")
+        return ""
+
+
+async def transcribe_audio_simple(audio_base64: str, mime_type: str, provider: Optional[str] = None) -> str:
+    """简单的语音转文字（不进行任务解析）"""
+    prompt = "准确地转录这段音频内容。只返回转录出的文本，不要有任何多余的解释或开头。"
+    try:
+        return call_ai_with_audio(audio_base64, mime_type, prompt, provider)
+    except Exception as e:
+        print(f"AI 语音转录失败: {e}")
+        return ""
+
+
+async def generate_daily_insight(tasks_summary: str, provider: Optional[str] = None) -> str:
+    """生成每日 AI 复盘洞察"""
+    prompt = f"""你是一个高级、毒辣且贴心的效率教练。
+以下是用户最近的任务概况：
+"{tasks_summary}"
+
+请根据任务的完成情况、截止日期和内容，给出极其精炼的一句话（20字以内）。
+风格要求：
+1. 不要官话，要像一个懂我的朋友或者严厉的教练。
+2. 可以是幽默的嘲讽、温暖的鼓励或精准的提醒。
+3. 必须是一句话。
+
+只返回这一句话的内容，不要有引号。"""
+    try:
+        response_text = call_ai(prompt, provider)
+        # 移除可能的引号和多余空白
+        import re
+        clean_text = re.sub(r'^["\'\s]+|["\'\s]+$', '', response_text)
+        return clean_text
+    except Exception as e:
+        print(f"AI 生成洞察失败: {e}")
+        return "保持节奏，今天也是新的一天。"

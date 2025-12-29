@@ -6,6 +6,20 @@
 // API 基础地址 - 从环境变量获取或使用默认值
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
+/** 获取本地存储的 Token */
+function getAuthToken(): string | null {
+    return localStorage.getItem('token');
+}
+
+/** 设置本地存储的 Token */
+export function setAuthToken(token: string | null) {
+    if (token) {
+        localStorage.setItem('token', token);
+    } else {
+        localStorage.removeItem('token');
+    }
+}
+
 // ==================== 类型定义 ====================
 
 /** 解析出的任务项 */
@@ -39,13 +53,20 @@ async function request<T>(
     options: RequestInit = {}
 ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
+    const token = getAuthToken();
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...((options.headers as Record<string, string>) || {}),
+    };
+
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
 
     const response = await fetch(url, {
         ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
+        headers,
     });
 
     if (!response.ok) {
@@ -109,6 +130,58 @@ export async function planTasks(input: string): Promise<{ analysis: string; item
     };
 }
 
+/**
+ * AI 聊天助手
+ * @param messages 对话历史
+ * @param taskContext 任务上下文
+ */
+export async function chatWithAI(
+    messages: Array<{ role: 'user' | 'model'; text: string }>,
+    taskContext: { title: string; details: string }
+): Promise<string> {
+    const response = await request<{ success: boolean; result: string }>('/ai/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+            messages,
+            taskContext,
+            provider: getSelectedProvider()
+        }),
+    });
+    return response.result;
+}
+
+/**
+ * AI 文本格式化
+ * @param text 原始内容
+ */
+export async function formatText(text: string): Promise<string> {
+    const response = await request<{ success: boolean; result: string }>('/ai/format', {
+        method: 'POST',
+        body: JSON.stringify({ text, provider: getSelectedProvider() }),
+    });
+    return response.result;
+}
+
+/**
+ * 语音转文字（简单转录）
+ * @param audioBase64 音频 Base64
+ * @param mimeType MIME 类型
+ */
+export async function transcribeAudioSimple(
+    audioBase64: string,
+    mimeType: string = 'audio/webm'
+): Promise<string> {
+    const response = await request<{ success: boolean; result: string }>('/ai/transcribe', {
+        method: 'POST',
+        body: JSON.stringify({
+            audio: audioBase64,
+            mimeType,
+            provider: getSelectedProvider()
+        }),
+    });
+    return response.result;
+}
+
 // ==================== 认证 API ====================
 
 /** 用户信息 */
@@ -154,10 +227,105 @@ export async function login(email: string, password: string): Promise<AuthRespon
 /**
  * 获取当前用户信息
  */
-export async function getCurrentUser(token: string): Promise<User> {
-    return request<User>('/auth/me', {
-        headers: {
-            Authorization: `Bearer ${token}`,
-        },
+export async function getCurrentUser(): Promise<User> {
+    return request<User>('/auth/me');
+}
+
+// ==================== 任务管理 API ====================
+
+/** 任务响应对象 */
+export interface TaskResponse {
+    id: string;
+    text: string;
+    details?: string;
+    due_date?: string;
+    timeframe?: string;
+    archived: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+/** 任务列表响应 */
+interface TaskListResponse {
+    tasks: TaskResponse[];
+    total: number;
+}
+
+/**
+ * 获取云端任务列表
+ */
+export async function getCloudTasks(params?: { timeframe?: string, archived?: boolean }): Promise<TaskResponse[]> {
+    let query = '';
+    if (params) {
+        const q = new URLSearchParams();
+        if (params.timeframe) q.append('timeframe', params.timeframe);
+        if (params.archived !== undefined) q.append('archived', String(params.archived));
+        query = `?${q.toString()}`;
+    }
+    const response = await request<TaskListResponse>(`/tasks${query}`);
+    return response.tasks;
+}
+
+/**
+ * 创建云端任务
+ */
+export async function createCloudTask(task: {
+    text: string;
+    details?: string;
+    due_date?: string;
+    timeframe?: string;
+    archived?: boolean;
+}): Promise<TaskResponse> {
+    return request<TaskResponse>('/tasks', {
+        method: 'POST',
+        body: JSON.stringify(task),
+    });
+}
+
+/**
+ * 更新云端任务
+ */
+export async function updateCloudTask(id: string, updates: Partial<TaskResponse>): Promise<TaskResponse> {
+    return request<TaskResponse>(`/tasks/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+    });
+}
+
+/**
+ * 删除云端任务
+ */
+export async function deleteCloudTask(id: string): Promise<void> {
+    await request(`/tasks/${id}`, {
+        method: 'DELETE',
+    });
+}
+
+/**
+ * 批量同步本地任务到云端
+ */
+export async function syncTasksBatch(tasks: any[], strategy: 'merge' | 'replace' = 'merge'): Promise<void> {
+    await request('/tasks/sync', {
+        method: 'POST',
+        body: JSON.stringify({
+            tasks: tasks.map(t => ({
+                id: t.id,
+                text: t.text,
+                details: t.details,
+                due_date: t.dueDate,
+                timeframe: t.timeframe,
+                archived: t.archived
+            })),
+            merge_strategy: strategy
+        }),
+    });
+}
+
+/**
+ * 删除所有云端任务
+ */
+export async function deleteAllCloudTasks(): Promise<void> {
+    await request('/tasks', {
+        method: 'DELETE',
     });
 }

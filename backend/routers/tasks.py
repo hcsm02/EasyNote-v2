@@ -226,8 +226,33 @@ async def sync_tasks(
     
     # 添加新任务
     for task_data in sync_data.tasks:
+        # 去重逻辑：如果提供了 ID 且已存在，或者内容（文本+日期）完全一致且属于该用户，则跳过
+        existing_task = None
+        
+        # 1. 优先通过 ID 检查
+        if task_data.id:
+            existing_task = db.query(Task).filter(
+                Task.id == task_data.id,
+                Task.user_id == current_user.id
+            ).first()
+            
+        # 2. 如果 ID 不匹配且是 merge 模式，通过内容检查
+        if not existing_task and sync_data.merge_strategy == "merge":
+            existing_task = db.query(Task).filter(
+                Task.user_id == current_user.id,
+                Task.text == task_data.text,
+                Task.due_date == task_data.due_date,
+                Task.archived == task_data.archived
+            ).first()
+            
+        if existing_task:
+            # 如果已存在，记录 ID 但不新建
+            task_ids.append(existing_task.id)
+            continue
+            
+        # 创建新任务
         new_task = Task(
-            id=str(uuid.uuid4()),
+            id=task_data.id if task_data.id and len(task_data.id) == 36 else str(uuid.uuid4()),
             user_id=current_user.id,
             text=task_data.text,
             details=task_data.details,

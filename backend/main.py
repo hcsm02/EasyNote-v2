@@ -5,7 +5,9 @@ FastAPI 应用配置和启动
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+import os
 
 from config import get_settings
 from database import init_db
@@ -75,6 +77,13 @@ async def health_check():
     健康检查接口
     """
     return {"status": "healthy"}
+
+
+# 托管静态文件 (用于单容器部署)
+# 检查是否存在 static 目录（由 Docker 构建或手动放入）
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":

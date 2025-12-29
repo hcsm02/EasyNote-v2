@@ -11,7 +11,10 @@ from services.ai_service import (
     parse_tasks_from_text,
     parse_tasks_from_audio,
     plan_tasks,
-    PROVIDER_DEFAULTS,
+    chat_with_ai,
+    format_notes,
+    transcribe_audio_simple,
+    generate_daily_insight,
     get_ai_config,
 )
 from config import get_settings
@@ -62,6 +65,31 @@ class PlanResponse(BaseModel):
     success: bool
     analysis: str
     items: List[TaskItem]
+
+
+class ChatRequest(BaseModel):
+    """聊天请求"""
+    messages: List[dict] = Field(..., description="对话历史")
+    taskContext: dict = Field(..., description="任务上下文 (title, details)")
+    provider: Optional[str] = Field(None, description="指定 AI 提供商")
+
+
+class FormatRequest(BaseModel):
+    """格式化请求"""
+    text: str = Field(..., description="要格式化的文本")
+    provider: Optional[str] = Field(None, description="指定 AI 提供商")
+
+
+class DailyInsightRequest(BaseModel):
+    """每日洞察请求"""
+    tasksSummary: str = Field(..., description="任务概况文本")
+    provider: Optional[str] = Field(None, description="指定 AI 提供商")
+
+
+class SimpleResponse(BaseModel):
+    """通用简单响应"""
+    success: bool
+    result: str
 
 
 class ProviderInfo(BaseModel):
@@ -164,6 +192,45 @@ async def create_plan(request: PlanRequest):
         )
 
 
+@router.post("/chat", response_model=SimpleResponse)
+async def chat(request: ChatRequest):
+    """与 AI 助手聊天"""
+    try:
+        result = await chat_with_ai(request.messages, request.taskContext, request.provider)
+        return SimpleResponse(success=True, result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/format", response_model=SimpleResponse)
+async def format_text(request: FormatRequest):
+    """格式化并美化文本"""
+    try:
+        result = await format_notes(request.text, request.provider)
+        return SimpleResponse(success=True, result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/transcribe", response_model=SimpleResponse)
+async def transcribe(request: ParseAudioRequest):
+    """简单的语音转文字"""
+    try:
+        result = await transcribe_audio_simple(request.audio, request.mimeType, request.provider)
+        return SimpleResponse(success=True, result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/daily-insight", response_model=SimpleResponse)
+async def daily_insight(request: DailyInsightRequest):
+    """获取 AI 每日复盘洞察"""
+    try:
+        result = await generate_daily_insight(request.tasksSummary, request.provider)
+        return SimpleResponse(success=True, result=result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # 平台显示名称映射
 PROVIDER_NAMES = {
     "gemini": "Google Gemini",
@@ -180,7 +247,7 @@ async def get_providers():
     
     返回所有 AI 提供商及其配置状态。
     """
-    from services.ai_service import get_available_providers, PROVIDER_DEFAULTS
+    from services.ai_service import get_available_providers
     
     providers_status = get_available_providers()
     providers = []

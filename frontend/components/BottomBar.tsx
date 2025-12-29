@@ -6,13 +6,15 @@ interface BottomBarProps {
   onModeSwitch: (mode: InputMode) => void;
   activeAppView: AppView;
   onAppViewSwitch: (view: AppView) => void;
+  onCreateNew: () => void;
 }
 
-const BottomBar: React.FC<BottomBarProps> = ({ 
-  activeMode, 
-  onModeSwitch, 
-  activeAppView, 
-  onAppViewSwitch 
+const BottomBar: React.FC<BottomBarProps> = ({
+  activeMode,
+  onModeSwitch,
+  activeAppView,
+  onAppViewSwitch,
+  onCreateNew
 }) => {
   const handleInputToggle = (mode: InputMode) => {
     if (activeMode === mode) {
@@ -37,68 +39,78 @@ const BottomBar: React.FC<BottomBarProps> = ({
   };
 
   const navItems = [
-    { 
-      id: 'voice', 
+    {
+      id: 'create',
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>
-      ), 
-      action: () => handleInputToggle('voice'), 
-      isActive: activeMode === 'voice',
-      activeColor: 'text-[#34749D]', 
-      inactiveColor: 'text-[#648CA6]' 
+      ),
+      action: onCreateNew,
+      isActive: false,
+      activeColor: 'text-[#34749D]',
+      inactiveColor: 'text-[#34749D]'
     },
-    { 
-      id: 'text', 
+    {
+      id: 'text',
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 8V4H8" />
+          <rect width="16" height="12" x="4" y="8" rx="2" strokeWidth={3} />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M2 14h2M20 14h2M15 13v2M9 13v2" />
         </svg>
-      ), 
-      action: () => handleInputToggle('text'), 
+      ),
+      action: () => handleInputToggle('text'),
       isActive: activeMode === 'text',
-      activeColor: 'text-[#B05B2D]', 
-      inactiveColor: 'text-[#C38B6E]' 
+      activeColor: 'text-[#6366F1]',
+      inactiveColor: 'text-[#818CF8]'
     },
-    { 
-      id: 'calendar', 
+    {
+      id: 'calendar',
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
         </svg>
-      ), 
-      action: () => handleViewToggle('calendar'), 
+      ),
+      action: () => handleViewToggle('calendar'),
       isActive: activeAppView === 'calendar',
-      activeColor: 'text-[#4D886D]', 
-      inactiveColor: 'text-[#779C8A]' 
+      activeColor: 'text-[#4D886D]',
+      inactiveColor: 'text-[#779C8A]'
     },
-    { 
-      id: 'archived', 
+    {
+      id: 'archived',
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        <svg className="w-[22px] h-[22px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
         </svg>
-      ), 
-      action: () => handleViewToggle('archived'), 
+      ),
+      action: () => handleViewToggle('archived'),
       isActive: activeAppView === 'archived',
-      activeColor: 'text-[#7B5FA0]', 
-      inactiveColor: 'text-[#9683AF]' 
+      activeColor: 'text-[#7B5FA0]',
+      inactiveColor: 'text-[#9683AF]'
     }
   ];
 
+  const triggerHaptic = () => {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(10); // 短促的震动，模拟物理按压感
+    }
+  };
+
   return (
     <nav className="fixed bottom-3 inset-x-0 h-18 flex items-center justify-center px-5 z-[100]">
-      <div className="nm-raised rounded-[24px] px-5 py-2 flex items-center justify-between w-full max-w-sm">
+      <div className="nm-raised rounded-[24px] px-8 py-2 flex items-center justify-between w-full max-w-xl">
         {navItems.map((item) => (
-          <button 
+          <button
             key={item.id}
-            onClick={item.action}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 nm-button ${
-              item.isActive 
-                ? `nm-inset ${item.activeColor}` 
-                : `${item.inactiveColor}`
-            }`}
+            onClick={() => {
+              triggerHaptic();
+              item.action();
+            }}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 nm-button ${item.isActive
+              ? `nm-inset ${item.activeColor}`
+              : `${item.inactiveColor}`
+              }`}
           >
             {item.icon}
           </button>

@@ -26,9 +26,9 @@ const MainCard: React.FC<MainCardProps> = ({ tasks, onToggle, onEdit, title, swi
           {tasks.length}
         </div>
       </div>
-      
+
       {/* Task list container */}
-      <div className="flex flex-col space-y-4 flex-1 overflow-y-auto pr-0.5 no-scrollbar pb-2">
+      <div className="flex flex-col space-y-4 flex-1 overflow-y-auto pr-1 pb-2 custom-scrollbar min-h-0">
         {tasks.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-300 font-light">
             <div className="w-1 h-1 bg-gray-200 rounded-full mb-2"></div>
@@ -36,10 +36,10 @@ const MainCard: React.FC<MainCardProps> = ({ tasks, onToggle, onEdit, title, swi
           </div>
         ) : (
           tasks.map((task) => (
-            <TaskItem 
-              key={task.id} 
-              task={task} 
-              onToggle={() => onToggle(task.id)} 
+            <TaskItem
+              key={task.id}
+              task={task}
+              onToggle={() => onToggle(task.id)}
               onEdit={() => onEdit(task.id)}
             />
           ))

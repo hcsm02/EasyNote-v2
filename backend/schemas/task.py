@@ -21,6 +21,7 @@ class TimeframeEnum(str, Enum):
 
 class TaskCreate(BaseModel):
     """创建任务请求"""
+    id: Optional[str] = Field(None, description="任务 ID (可选，用于同步去重)")
     text: str = Field(..., min_length=1, max_length=1000, description="任务内容")
     details: Optional[str] = Field(None, max_length=5000, description="详细描述")
     due_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="截止日期 YYYY-MM-DD")
