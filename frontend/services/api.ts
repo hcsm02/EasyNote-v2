@@ -3,8 +3,10 @@
  * 封装对后端 API 的 HTTP 请求
  */
 
-// API 基础地址 - 从环境变量获取或使用默认值
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// API 基础地址 - 生产环境使用相对路径（前后端同源），开发环境使用完整地址
+const API_BASE_URL = import.meta.env.DEV
+    ? 'http://localhost:8000/api'
+    : '/api';
 
 /** 获取本地存储的 Token */
 function getAuthToken(): string | null {

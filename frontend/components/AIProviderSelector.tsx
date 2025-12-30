@@ -36,7 +36,7 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
     useEffect(() => {
         const fetchProviders = async () => {
             try {
-                const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+                const API_BASE = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
                 const response = await fetch(`${API_BASE}/ai/providers`);
                 if (response.ok) {
                     const data = await response.json();
@@ -152,7 +152,7 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
 
                                 {/* Status indicator */}
                                 <div className={`w-3 h-3 rounded-full ${provider.id === selectedId ? 'bg-indigo-500' :
-                                        provider.available ? 'bg-green-400' : 'bg-gray-300'
+                                    provider.available ? 'bg-green-400' : 'bg-gray-300'
                                     }`} />
                             </button>
                         ))}

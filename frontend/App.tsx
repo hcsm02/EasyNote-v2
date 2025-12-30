@@ -74,7 +74,7 @@ const App: React.FC = () => {
 
       const summary = `当前有 ${activeCount} 个待办任务，今天已完成 ${archivedToday} 个。前几个任务包含: ${topTasks}`;
 
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const API_BASE = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
       const response = await fetch(`${API_BASE}/ai/daily-insight`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -225,7 +225,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkAIStatus = async () => {
       try {
-        const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+        const API_BASE = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
         const response = await fetch(`${API_BASE}/ai/providers`);
         if (response.ok) {
           const data = await response.json();

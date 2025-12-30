@@ -10,8 +10,8 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """应用配置类"""
     
-    # 数据库配置
-    DATABASE_URL: str = "sqlite:///./easynote.db"
+    # 数据库配置 - 使用 data 目录实现持久化
+    DATABASE_URL: str = "sqlite:///./data/easynote.db"
     
     # JWT 配置
     SECRET_KEY: str = "your-super-secret-key-change-this"
