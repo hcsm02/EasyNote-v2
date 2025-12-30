@@ -10,13 +10,11 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """应用配置类"""
     
-    # 数据库配置 - 使用绝对路径确保持久化
-    # 开发环境使用相对路径，生产环境使用 /app/data/
+    # 数据库配置 - 使用环境变量或默认的 Docker 容器路径
+    # 生产环境：直接使用 /app/data/easynote.db
+    # 开发环境：可通过环境变量覆盖
     import os as _os
-    _base_dir = _os.path.dirname(_os.path.abspath(__file__))
-    _data_dir = _os.path.join(_base_dir, 'data')
-    _os.makedirs(_data_dir, exist_ok=True)
-    DATABASE_URL: str = f"sqlite:///{_os.path.join(_data_dir, 'easynote.db')}"
+    DATABASE_URL: str = _os.getenv("DATABASE_URL", "sqlite:////app/data/easynote.db")
     
     # JWT 配置
     SECRET_KEY: str = "your-super-secret-key-change-this"
