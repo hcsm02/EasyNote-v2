@@ -18,7 +18,7 @@ jobs:
           script: |
             cd /aiModels/docker/EasyNote
             git pull origin main
-            docker build -t easynote:latest .
+            docker build --no-cache -t easynote:latest .
             docker stop easynote || true
             docker rm easynote || true
             docker run -d \
