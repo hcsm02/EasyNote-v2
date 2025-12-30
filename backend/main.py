@@ -59,10 +59,10 @@ app.include_router(tasks_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 
 
-@app.get("/")
-async def root():
+@app.get("/api/info")
+async def api_info():
     """
-    根路径 - 健康检查
+    API 信息（原根路径移至此处，以便前端静态文件托管）
     """
     return {
         "message": "EasyNote API 运行中",
