@@ -16,16 +16,16 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd /opt/easynote
+            cd /aiModels/docker/EasyNote
             git pull origin main
             docker build -t easynote:latest .
             docker stop easynote || true
             docker rm easynote || true
             docker run -d \
               --name easynote \
-              -p 8001:8000 \
-              -v /opt/easynote/data:/app/data \
-              --env-file /opt/easynote/.env \
+              -p 8038:8000 \
+              -v /aiModels/docker/EasyNote/data:/app/data \
+              --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
               easynote:latest
             echo "✅ EasyNote 部署成功！"
