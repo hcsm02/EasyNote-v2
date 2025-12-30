@@ -142,22 +142,51 @@ const App: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // 从本地存储加载任务
+  // 从云端或本地存储加载任务
   useEffect(() => {
     const loadTasks = async () => {
       // 检查 Token 并获取用户信息
       const token = localStorage.getItem('token');
+      let isLoggedIn = false;
+
       if (token) {
         try {
           const userData = await getCurrentUser();
           setUser(userData);
-          // 如果已登录，尝试从云端拉取最新数据（或者在此决定同步策略）
+          isLoggedIn = true;
+
+          // 已登录：从云端拉取最新数据
+          try {
+            const cloudTasks = await getCloudTasks();
+            // 转换云端数据格式并计算时间分类
+            const convertedTasks: Task[] = cloudTasks.map((ct: TaskResponse) => ({
+              id: ct.id,
+              text: ct.text,
+              details: ct.details || '',
+              dueDate: ct.due_date || '',
+              timeframe: calculateTimeframe(ct.due_date || ''),
+              archived: ct.archived,
+              createdAt: ct.created_at ? new Date(ct.created_at).getTime() : Date.now(),
+              selected: false
+            }));
+            setTasks(convertedTasks);
+            // 同时更新本地缓存
+            if (isIndexedDBAvailable()) {
+              await saveAllTasks(convertedTasks);
+            }
+            setIsDataLoaded(true);
+            return;
+          } catch (cloudErr) {
+            console.error('云端数据加载失败，使用本地缓存:', cloudErr);
+            // 云端失败时回退到本地
+          }
         } catch (err) {
           console.error('自动登录失败:', err);
           setAuthToken(null);
         }
       }
 
+      // 未登录或云端失败：从本地存储加载
       if (!isIndexedDBAvailable()) {
         console.warn('IndexedDB 不可用，数据将无法持久化');
         setIsDataLoaded(true);
