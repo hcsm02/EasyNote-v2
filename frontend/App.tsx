@@ -51,6 +51,10 @@ const App: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const formattedDate = currentTime.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/');
+  const weekday = currentTime.toLocaleDateString('en-US', { weekday: 'short' });
+
   // AI 每日洞察状态
   const [dailyInsight, setDailyInsight] = useState<string | null>(null);
   const [hasUnreadInsight, setHasUnreadInsight] = useState(false);
@@ -63,7 +67,8 @@ const App: React.FC = () => {
     try {
       // 准备任务简报
       const activeCount = tasks.filter(t => !t.archived).length;
-      const todayISO = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const archivedToday = tasks.filter(t => t.archived && t.dueDate === todayISO).length;
       const topTasks = tasks.filter(t => !t.archived).slice(0, 5).map(t => t.text).join(', ');
 
@@ -95,7 +100,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isDataLoaded || !isAIAvailable) return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const lastDate = localStorage.getItem('lastInsightDate');
     const lastContent = localStorage.getItem('lastInsightContent');
 
@@ -108,15 +114,28 @@ const App: React.FC = () => {
         fetchDailyInsight();
       }
     }
-  }, [isDataLoaded, isAIAvailable, tasks.length]);
+  }, [isDataLoaded, isAIAvailable, tasks.length, fetchDailyInsight, formattedDate]);
 
-  const handleShowInsight = () => {
+  const handleShowInsight = (forceRefresh = false) => {
+    if (isInsightLoading) return;
+
+    // 强制刷新：即使当天已有复盘也重新获取
+    if (forceRefresh && isAIAvailable) {
+      if ('vibrate' in navigator) navigator.vibrate([10, 50, 10]); // 双振
+      fetchDailyInsight();
+      return;
+    }
+
     if (dailyInsight) {
       if ('vibrate' in navigator) navigator.vibrate(10);
       alert(`🤖 AI 每日复盘：\n\n"${dailyInsight}"`);
       setHasUnreadInsight(false);
-      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       localStorage.setItem('lastInsightSeen', today);
+    } else if (isAIAvailable) {
+      // 如果没有复盘但 AI 可用，尝试手动拉取一次
+      fetchDailyInsight();
     }
   };
 
@@ -147,7 +166,12 @@ const App: React.FC = () => {
       try {
         const storedTasks = await getAllTasks();
         if (storedTasks.length > 0) {
-          setTasks(storedTasks);
+          // 自动校准分类：如果昨天没关电脑跨天了，需要重新计算分类
+          const reCalibratedTasks = storedTasks.map(t => ({
+            ...t,
+            timeframe: calculateTimeframe(t.dueDate)
+          }));
+          setTasks(reCalibratedTasks);
         }
       } catch (error) {
         console.error('加载任务失败:', error);
@@ -174,9 +198,28 @@ const App: React.FC = () => {
   }, [tasks, isDataLoaded]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => {
+      const now = new Date();
+      // 更新当前时间用于 UI 显示
+      setCurrentTime(now);
+
+      // 核心：检测日期变更（跨天自动刷新）
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const lastCheckedDate = localStorage.getItem('lastSystemDate');
+
+      if (lastCheckedDate && lastCheckedDate !== todayStr) {
+        console.log('检测到跨天，正在自动重新校准任务分类...');
+        setTasks(prev => prev.map(t => ({
+          ...t,
+          timeframe: calculateTimeframe(t.dueDate)
+        })));
+        // 日期变更时，强制将当前视图重置为“今天”
+        setCurrentTimeView(TimeView.TODAY);
+      }
+      localStorage.setItem('lastSystemDate', todayStr);
+    }, 60000); // 每分钟检查一次
     return () => clearInterval(timer);
-  }, []);
+  }, [tasks.length]); // 监听列表长度变更以确保引用最新函数
 
   // 检测 AI 是否可用
   useEffect(() => {
@@ -267,15 +310,21 @@ const App: React.FC = () => {
   };
 
   const calculateTimeframe = (dateISO: string): TimeView => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const targetDate = new Date(dateISO);
-    targetDate.setHours(0, 0, 0, 0);
+    const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
 
-    const diffDays = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    // 获取 targetDate 的 YYYY-MM-DD
+    const targetDateObj = new Date(dateISO);
+    const targetStr = `${targetDateObj.getFullYear()}-${String(targetDateObj.getMonth() + 1).padStart(2, '0')}-${String(targetDateObj.getDate()).padStart(2, '0')}`;
 
-    if (diffDays < 0) return TimeView.HISTORY;
-    if (diffDays === 0) return TimeView.TODAY;
+    if (targetStr < todayStr) return TimeView.HISTORY;
+    if (targetStr === todayStr) return TimeView.TODAY;
+
+    // 计算未来天数
+    const todayObj = new Date();
+    todayObj.setHours(0, 0, 0, 0);
+    targetDateObj.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((targetDateObj.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24));
+
     if (diffDays <= 2) return TimeView.FUTURE2;
     return TimeView.LATER;
   };
@@ -520,10 +569,6 @@ const App: React.FC = () => {
     }
   };
 
-  const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  const formattedDate = currentTime.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '/');
-  const weekday = currentTime.toLocaleDateString('en-US', { weekday: 'short' });
-
   const activeEditingTask = tasks.find(t => t.id === editingTaskId);
 
   return (
@@ -578,15 +623,22 @@ const App: React.FC = () => {
           <div className="text-3xl font-light text-gray-700 mb-1">{formattedTime}</div>
           <div className="text-[10px] text-gray-400 font-bold tracking-tight flex items-center justify-center gap-2">
             {isSyncing ? (
-              <span className="inline-block w-2 h-2 bg-indigo-400 rounded-full animate-ping"></span>
+              <span className="inline-block w-2 h-2 bg-indigo-400 rounded-full animate-ping" title="同步中..."></span>
+            ) : hasUnreadInsight ? (
+              <span
+                onClick={() => handleShowInsight()}
+                onContextMenu={(e) => { e.preventDefault(); handleShowInsight(true); }}
+                className="inline-block w-2.5 h-2.5 bg-purple-500 rounded-full cursor-pointer shadow-[0_0_8px_rgba(168,85,247,0.8)] animate-pulse transition-all duration-700"
+                title="点击查看复盘 | 右键/长按强制刷新"
+              ></span>
+            ) : isInsightLoading ? (
+              <span className="inline-block w-2 h-2 bg-purple-300 rounded-full animate-pulse opacity-50" title="AI 正在思考..."></span>
             ) : user ? (
               <span
-                onClick={handleShowInsight}
-                className={`inline-block w-2 h-2 rounded-full cursor-pointer transition-all duration-700 ${hasUnreadInsight
-                  ? 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)] animate-pulse'
-                  : 'bg-green-400 opacity-80'
-                  }`}
-                title={hasUnreadInsight ? "点击查看 AI 每日复盘" : "系统就绪"}
+                onClick={() => handleShowInsight()}
+                onContextMenu={(e) => { e.preventDefault(); handleShowInsight(true); }}
+                className="inline-block w-2 h-2 bg-green-400 rounded-full opacity-80 cursor-pointer hover:scale-125 transition-transform"
+                title="点击唤醒 AI 复盘 | 右键/长按强制刷新"
               ></span>
             ) : null}
             {user && (

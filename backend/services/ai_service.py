@@ -6,6 +6,7 @@ AI 服务
 from config import get_settings
 from typing import Optional, List
 import json
+from datetime import datetime
 
 # 获取配置
 settings = get_settings()
@@ -335,7 +336,7 @@ async def transcribe_audio_simple(audio_base64: str, mime_type: str, provider: O
 
 async def generate_daily_insight(tasks_summary: str, provider: Optional[str] = None) -> str:
     """生成每日 AI 复盘洞察"""
-    prompt = f"""你是一个高级、毒辣且贴心的效率教练。
+    prompt = f"""你是一个高级、毒辣且贴心的效率教练。今天是 {datetime.now().strftime('%Y-%m-%d')}。
 以下是用户最近的任务概况：
 "{tasks_summary}"
 
@@ -343,15 +344,13 @@ async def generate_daily_insight(tasks_summary: str, provider: Optional[str] = N
 风格要求：
 1. 不要官话，要像一个懂我的朋友或者严厉的教练。
 2. 可以是幽默的嘲讽、温暖的鼓励或精准的提醒。
-3. 必须是一句话。
 
-只返回这一句话的内容，不要有引号。"""
+严格返回以下 JSON 格式：
+{{"insight": "评价内容"}}"""
     try:
         response_text = call_ai(prompt, provider)
-        # 移除可能的引号和多余空白
-        import re
-        clean_text = re.sub(r'^["\'\s]+|["\'\s]+$', '', response_text)
-        return clean_text
+        data = json.loads(response_text)
+        return data.get("insight", "保持节奏，今天也是新的一天。")
     except Exception as e:
         print(f"AI 生成洞察失败: {e}")
         return "保持节奏，今天也是新的一天。"
