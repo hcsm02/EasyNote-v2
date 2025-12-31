@@ -71,6 +71,50 @@ async def api_info():
     }
 
 
+@app.get("/api/debug/db")
+async def debug_db():
+    """
+    数据库诊断接口
+    返回当前数据库文件的路径、大小及连接状态
+    """
+    from database import engine
+    import os
+    
+    db_url = str(engine.url)
+    db_path = "Unknown"
+    file_size = -1
+    exists = False
+    
+    if "sqlite" in db_url:
+        # 提取 sqlite:////path/to/db 中的路径
+        # 处理不同前缀: sqlite:///, sqlite:////, sqlite:/// (相对路径)
+        path_part = db_url.split("sqlite://")[-1]
+        # 去掉多余的斜杠转换成绝对路径
+        if path_part.startswith("////"):
+            db_path = path_part[3:] # /// 后面是盘符
+        elif path_part.startswith("///"):
+            db_path = path_part[3:]
+        elif path_part.startswith("//"):
+             db_path = path_part[2:]
+        else:
+            db_path = path_part
+            
+        # 尝试获取文件信息
+        if os.path.exists(db_path):
+            exists = True
+            file_size = os.path.getsize(db_path)
+            db_path = os.path.abspath(db_path)
+            
+    return {
+        "database_url_configured": settings.DATABASE_URL,
+        "database_url_actual": db_url,
+        "db_file_path": db_path,
+        "db_file_exists": exists,
+        "db_file_size_bytes": file_size,
+        "cwd": os.getcwd()
+    }
+
+
 @app.get("/health")
 async def health_check():
     """

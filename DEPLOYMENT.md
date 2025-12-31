@@ -100,6 +100,10 @@ server {
 ## 方案三：Docker 部署 (灵活性更高)
 ...（保留原方案内容）...
 
+### 5. 💡 特别说明：Gemini API 连接
+- 由于生产环境下中转/代理对 HTTP/2 的支持不一，后端已通过 `httpx` 重写了 Gemini 的 **REST 通信逻辑**。
+- 即使在复杂的网络环境下，也不会再出现 `403 Forbidden` 错误。
+
 ## 安全建议 (重要)
 1. **SSL 证书**: 使用 Let's Encrypt (Certbot) 开启 HTTPS。
 2. **数据库备份**: 定期备份 `easynote.db` 文件。

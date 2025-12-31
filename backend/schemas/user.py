@@ -33,6 +33,7 @@ class UserUpdate(BaseModel):
     """更新用户信息请求"""
     nickname: Optional[str] = Field(None, max_length=50, description="昵称")
     avatar_url: Optional[str] = Field(None, max_length=500, description="头像 URL")
+    settings_json: Optional[str] = Field(None, max_length=2000, description="用户设置 JSON")
 
 
 # ==================== 响应模式 ====================
@@ -43,6 +44,7 @@ class UserResponse(BaseModel):
     email: str
     nickname: Optional[str] = None
     avatar_url: Optional[str] = None
+    settings_json: Optional[str] = None
     created_at: datetime
     
     class Config:

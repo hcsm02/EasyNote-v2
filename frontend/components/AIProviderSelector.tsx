@@ -17,6 +17,7 @@ interface Provider {
 
 interface AIProviderSelectorProps {
     onClose: () => void;
+    onSettingsChange?: (updates: { aiTextProvider?: string; aiVoiceProvider?: string; aiProvider?: string }) => void;
 }
 
 // 获取保存的 provider
@@ -31,7 +32,7 @@ export function setSelectedProvider(mode: SelectorMode, provider: string): void 
     localStorage.setItem(key, provider);
 }
 
-const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
+const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose, onSettingsChange }) => {
     const [providers, setProviders] = useState<Provider[]>([]);
     const [activeTab, setActiveTab] = useState<SelectorMode>('text');
     const [selectedTextId, setSelectedTextId] = useState<string | null>(getSelectedProvider('text'));
@@ -69,9 +70,11 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
             if (activeTab === 'text') {
                 setSelectedTextId(id);
                 setSelectedProvider('text', id);
+                if (onSettingsChange) onSettingsChange({ aiTextProvider: id });
             } else {
                 setSelectedVoiceId(id);
                 setSelectedProvider('voice', id);
+                if (onSettingsChange) onSettingsChange({ aiVoiceProvider: id });
             }
 
             // 触觉反馈

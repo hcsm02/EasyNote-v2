@@ -22,6 +22,7 @@ import {
   createCloudTask,
   updateCloudTask,
   deleteCloudTask,
+  updateCurrentUser,
   TaskResponse
 } from './services/api';
 import { User } from './services/api';
@@ -32,8 +33,8 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  const [waterCount, setWaterCount] = useState(1);
-  const waterTarget = 8;
+  const [waterCount, setWaterCount] = useState(0);
+  const [waterTarget, setWaterTarget] = useState(8);
 
   const [currentTimeView, setCurrentTimeView] = useState<TimeView>(TimeView.TODAY);
   const [inputMode, setInputMode] = useState<InputMode>('none');
@@ -155,6 +156,22 @@ const App: React.FC = () => {
           setUser(userData);
           isLoggedIn = true;
 
+          // 同步用户设置 (喝水数据、AI 模型等)
+          if (userData.settings_json) {
+            try {
+              const cloudSettings = JSON.parse(userData.settings_json);
+              if (cloudSettings.waterCount !== undefined) setWaterCount(cloudSettings.waterCount);
+              if (cloudSettings.waterTarget !== undefined) setWaterTarget(cloudSettings.waterTarget);
+
+              // 同步 AI 模型设置到 LocalStorage (供 api.ts 使用)
+              if (cloudSettings.aiTextProvider) localStorage.setItem('aiTextProvider', cloudSettings.aiTextProvider);
+              if (cloudSettings.aiVoiceProvider) localStorage.setItem('aiVoiceProvider', cloudSettings.aiVoiceProvider);
+              if (cloudSettings.aiProvider) localStorage.setItem('aiProvider', cloudSettings.aiProvider);
+            } catch (pErr) {
+              console.error('解析用户设置失败:', pErr);
+            }
+          }
+
           // 已登录：从云端拉取最新数据
           try {
             const cloudTasks = await getCloudTasks();
@@ -163,6 +180,7 @@ const App: React.FC = () => {
               id: ct.id,
               text: ct.text,
               details: ct.details || '',
+              startDate: ct.start_date || ct.due_date || '',
               dueDate: ct.due_date || '',
               timeframe: calculateTimeframe(ct.due_date || ''),
               archived: ct.archived,
@@ -358,9 +376,11 @@ const App: React.FC = () => {
   };
 
   const calculateTimeframe = (dateISO: string): TimeView => {
-    const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+    // 使用统一的 ISO 格式获取今天日期 (YYYY-MM-DD)
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    // 获取 targetDate 的 YYYY-MM-DD
+    // 确保传入的也是标准的 YYYY-MM-DD
     const targetDateObj = new Date(dateISO);
     const targetStr = `${targetDateObj.getFullYear()}-${String(targetDateObj.getMonth() + 1).padStart(2, '0')}-${String(targetDateObj.getDate()).padStart(2, '0')}`;
 
@@ -370,12 +390,39 @@ const App: React.FC = () => {
     // 计算未来天数
     const todayObj = new Date();
     todayObj.setHours(0, 0, 0, 0);
-    targetDateObj.setHours(0, 0, 0, 0);
-    const diffDays = Math.round((targetDateObj.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24));
+    const targetDateObjClean = new Date(dateISO);
+    targetDateObjClean.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.round((targetDateObjClean.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24));
 
     if (diffDays <= 2) return TimeView.FUTURE2;
     return TimeView.LATER;
   };
+
+  // 同步用户设置到云端 (喝水、模型等)
+  const syncSettingsToCloud = useCallback(async (updates: any) => {
+    if (!user) return;
+    try {
+      const currentSettings = user.settings_json ? JSON.parse(user.settings_json) : {};
+      const newSettings = { ...currentSettings, ...updates };
+      const settingsStr = JSON.stringify(newSettings);
+
+      const updatedUser = await updateCurrentUser({ settings_json: settingsStr });
+      setUser(updatedUser);
+    } catch (err) {
+      console.error('同步设置到云端失败:', err);
+    }
+  }, [user]);
+
+  // 监听喝水变化并同步
+  useEffect(() => {
+    if (user && isDataLoaded) {
+      const timer = setTimeout(() => {
+        syncSettingsToCloud({ waterCount, waterTarget });
+      }, 1000); // 防抖
+      return () => clearTimeout(timer);
+    }
+  }, [waterCount, waterTarget, user, isDataLoaded]);
 
   const handleUpdateTask = async (id: string, updates: Partial<Task>) => {
     setTasks(prev => prev.map(t => {
@@ -594,22 +641,27 @@ const App: React.FC = () => {
 
     if (user) {
       try {
+        setIsSyncing(true);
         await syncTasksBatch(newTasks, 'merge');
-        // 为了方便，批量添加后直接重新拉取云端数据，确保 ID 同步
+
+        // 关键：批量添加后必须重新从云端拉取，以获取服务器生成的正式 ID 和时间戳
         const cloudTasks = await getCloudTasks();
         const unifiedTasks: Task[] = cloudTasks.map(ct => ({
           id: ct.id,
           text: ct.text,
           details: ct.details || '',
           createdAt: new Date(ct.created_at).getTime(),
+          startDate: ct.start_date || ct.due_date || new Date().toISOString().split('T')[0],
           dueDate: ct.due_date || new Date().toISOString().split('T')[0],
-          timeframe: (ct.timeframe as TimeView) || TimeView.TODAY,
+          timeframe: calculateTimeframe(ct.due_date || ''), // 使用标准化函数重新校准分类
           selected: false,
           archived: ct.archived
         }));
         setTasks(unifiedTasks);
       } catch (err) {
         console.error('批量同步失败:', err);
+      } finally {
+        setIsSyncing(false);
       }
     }
 
@@ -906,7 +958,10 @@ const App: React.FC = () => {
       )}
 
       {isAISettingsOpen && (
-        <AIProviderSelector onClose={() => setIsAISettingsOpen(false)} />
+        <AIProviderSelector
+          onClose={() => setIsAISettingsOpen(false)}
+          onSettingsChange={(updates) => syncSettingsToCloud(updates)}
+        />
       )}
 
       <BottomBar

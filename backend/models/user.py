@@ -22,6 +22,9 @@ class User(Base):
     nickname = Column(String(50), nullable=True)
     avatar_url = Column(String(500), nullable=True)
     
+    # 用户偏好设置 (JSON 格式存储：模型选择、喝水目标等)
+    settings_json = Column(String(2000), nullable=True)
+    
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

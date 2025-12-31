@@ -41,8 +41,21 @@ def get_db():
 def init_db():
     """
     初始化数据库
-    创建所有表
+    创建所有表，并尝试迁移旧表结构
     """
     # 导入所有模型以确保它们在创建表之前被注册
     from models import user, task  # noqa
     Base.metadata.create_all(bind=engine)
+    
+    # SQLite 自动迁移逻辑：手动添加新字段
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        # 检查并添加 settings_json 到 users 表
+        db.execute(text("ALTER TABLE users ADD COLUMN settings_json VARCHAR(2000)"))
+        db.commit()
+    except Exception:
+        # 如果列已存在会抛错，这里直接忽略即可
+        db.rollback()
+    finally:
+        db.close()

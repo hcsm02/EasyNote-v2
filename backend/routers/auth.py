@@ -107,6 +107,8 @@ async def update_current_user(
         current_user.nickname = user_data.nickname
     if user_data.avatar_url is not None:
         current_user.avatar_url = user_data.avatar_url
+    if user_data.settings_json is not None:
+        current_user.settings_json = user_data.settings_json
     
     db.commit()
     db.refresh(current_user)

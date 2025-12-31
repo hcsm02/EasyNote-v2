@@ -197,6 +197,7 @@ export interface User {
     email: string;
     nickname?: string;
     avatar_url?: string;
+    settings_json?: string;
     created_at: string;
 }
 
@@ -236,6 +237,16 @@ export async function login(email: string, password: string): Promise<AuthRespon
  */
 export async function getCurrentUser(): Promise<User> {
     return request<User>('/auth/me');
+}
+
+/**
+ * 更新当前用户信息
+ */
+export async function updateCurrentUser(updates: Partial<User>): Promise<User> {
+    return request<User>('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+    });
 }
 
 // ==================== 任务管理 API ====================
