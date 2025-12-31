@@ -1,9 +1,11 @@
 /**
  * AI Provider 选择器组件
- * 支持动态切换 AI 模型
+ * 支持独立切换文本解析和语音识别模型
  */
 
 import React, { useState, useEffect } from 'react';
+
+type SelectorMode = 'text' | 'voice';
 
 interface Provider {
     id: string;
@@ -18,18 +20,22 @@ interface AIProviderSelectorProps {
 }
 
 // 获取保存的 provider
-export function getSelectedProvider(): string | null {
-    return localStorage.getItem('aiProvider');
+export function getSelectedProvider(mode: SelectorMode): string | null {
+    const key = mode === 'text' ? 'aiTextProvider' : 'aiVoiceProvider';
+    return localStorage.getItem(key) || localStorage.getItem('aiProvider');
 }
 
 // 保存选择的 provider
-export function setSelectedProvider(provider: string): void {
-    localStorage.setItem('aiProvider', provider);
+export function setSelectedProvider(mode: SelectorMode, provider: string): void {
+    const key = mode === 'text' ? 'aiTextProvider' : 'aiVoiceProvider';
+    localStorage.setItem(key, provider);
 }
 
 const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
     const [providers, setProviders] = useState<Provider[]>([]);
-    const [selectedId, setSelectedId] = useState<string | null>(getSelectedProvider());
+    const [activeTab, setActiveTab] = useState<SelectorMode>('text');
+    const [selectedTextId, setSelectedTextId] = useState<string | null>(getSelectedProvider('text'));
+    const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(getSelectedProvider('voice'));
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -41,10 +47,9 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
                 if (response.ok) {
                     const data = await response.json();
                     setProviders(data.providers);
-                    // 如果没有选择过，使用后端默认
-                    if (!selectedId) {
-                        setSelectedId(data.current);
-                    }
+                    // 初始化选择
+                    if (!selectedTextId) setSelectedTextId(data.current);
+                    if (!selectedVoiceId) setSelectedVoiceId(data.current);
                 } else {
                     setError('无法获取 AI 配置');
                 }
@@ -61,12 +66,21 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
     const handleSelect = (id: string) => {
         const provider = providers.find(p => p.id === id);
         if (provider?.available) {
-            setSelectedId(id);
-            setSelectedProvider(id);
+            if (activeTab === 'text') {
+                setSelectedTextId(id);
+                setSelectedProvider('text', id);
+            } else {
+                setSelectedVoiceId(id);
+                setSelectedProvider('voice', id);
+            }
+
+            // 触觉反馈
+            if ('vibrate' in navigator) {
+                navigator.vibrate(20);
+            }
         }
     };
 
-    // Provider 图标
     const getIcon = (id: string) => {
         switch (id) {
             case 'gemini': return '✨';
@@ -76,6 +90,8 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
             default: return '🔮';
         }
     };
+
+    const currentSelectedId = activeTab === 'text' ? selectedTextId : selectedVoiceId;
 
     return (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-5 bg-[#F2F0E6]/90 backdrop-blur-md animate-in fade-in duration-300">
@@ -89,7 +105,7 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                             </svg>
                         </div>
-                        <h2 className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">AI 模型</h2>
+                        <h2 className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">AI 配置核心</h2>
                     </div>
                     <button
                         onClick={onClose}
@@ -102,6 +118,22 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
                     </button>
                 </div>
 
+                {/* Tabs */}
+                <div className="flex p-1 nm-inset rounded-2xl">
+                    <button
+                        onClick={() => setActiveTab('text')}
+                        className={`flex-1 py-2 text-[11px] font-bold rounded-xl transition-all ${activeTab === 'text' ? 'nm-raised text-indigo-600' : 'text-gray-400'}`}
+                    >
+                        ⌨️ 文本解析
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('voice')}
+                        className={`flex-1 py-2 text-[11px] font-bold rounded-xl transition-all ${activeTab === 'voice' ? 'nm-raised text-indigo-600' : 'text-gray-400'}`}
+                    >
+                        🎙️ 语音输入
+                    </button>
+                </div>
+
                 {/* Content */}
                 {loading ? (
                     <div className="py-10 flex items-center justify-center">
@@ -110,65 +142,46 @@ const AIProviderSelector: React.FC<AIProviderSelectorProps> = ({ onClose }) => {
                 ) : error ? (
                     <div className="py-10 text-center">
                         <p className="text-xs text-red-400 font-medium">{error}</p>
-                        <p className="text-[10px] text-gray-400 mt-2">请检查后端服务是否运行</p>
                     </div>
                 ) : (
-                    <div className="space-y-3">
-                        {providers.map((provider) => (
-                            <button
-                                key={provider.id}
-                                onClick={() => handleSelect(provider.id)}
-                                disabled={!provider.available}
-                                className={`w-full nm-raised-sm rounded-2xl p-4 flex items-center gap-4 transition-all text-left ${provider.id === selectedId ? 'ring-2 ring-indigo-400 nm-inset-sm' : ''
-                                    } ${!provider.available ? 'opacity-40 cursor-not-allowed' : 'hover:scale-[1.02] active:nm-inset'}`}
-                            >
-                                {/* Icon */}
-                                <div className="text-2xl">{getIcon(provider.id)}</div>
-
-                                {/* Info */}
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-bold text-gray-600">{provider.name}</span>
-                                        {provider.id === selectedId && (
-                                            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-bold uppercase">
-                                                使用中
-                                            </span>
-                                        )}
-                                        {!provider.available && (
-                                            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-bold">
-                                                未配置
-                                            </span>
-                                        )}
+                    <div className="space-y-3 max-h-[350px] overflow-y-auto px-1">
+                        {providers
+                            .filter(p => activeTab === 'text' || p.supportsAudio)
+                            .map((provider) => (
+                                <button
+                                    key={provider.id}
+                                    onClick={() => handleSelect(provider.id)}
+                                    disabled={!provider.available}
+                                    className={`w-full nm-raised-sm rounded-2xl p-4 flex items-center gap-4 transition-all text-left ${provider.id === currentSelectedId ? 'ring-2 ring-indigo-400 nm-inset-sm' : ''
+                                        } ${!provider.available ? 'opacity-40 cursor-not-allowed' : 'hover:scale-[1.01] active:nm-inset'}`}
+                                >
+                                    <div className="text-2xl">{getIcon(provider.id)}</div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-bold text-gray-600">{provider.name}</span>
+                                            {provider.id === currentSelectedId && (
+                                                <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-bold uppercase">选中</span>
+                                            )}
+                                        </div>
+                                        <div className="text-[10px] text-gray-400 mt-0.5">{provider.model}</div>
                                     </div>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <span className="text-[10px] text-gray-400">{provider.model}</span>
-                                        {provider.supportsAudio && (
-                                            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600 font-bold">
-                                                🎤 语音
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Status indicator */}
-                                <div className={`w-3 h-3 rounded-full ${provider.id === selectedId ? 'bg-indigo-500' :
-                                    provider.available ? 'bg-green-400' : 'bg-gray-300'
-                                    }`} />
-                            </button>
-                        ))}
+                                    <div className={`w-3 h-3 rounded-full ${provider.id === currentSelectedId ? 'bg-indigo-500' : 'bg-green-400'}`} />
+                                </button>
+                            ))}
                     </div>
                 )}
 
                 {/* Footer */}
-                <div className="text-center pt-2 space-y-2">
+                <div className="text-center pt-2">
                     <p className="text-[9px] text-gray-400">
-                        点击切换模型，选择立即生效
+                        {activeTab === 'text' ? '配置智能规划与打字解析模型' : '配置语音转任务专用多模态模型'}
                     </p>
-                    {providers.some(p => !p.available) && (
-                        <p className="text-[8px] text-gray-300">
-                            未配置的模型请在 <code className="px-1 py-0.5 bg-gray-100 rounded text-gray-500">backend/.env</code> 添加 API Key
-                        </p>
-                    )}
+                    <button
+                        onClick={onClose}
+                        className="mt-4 w-full py-3 nm-raised rounded-2xl text-[12px] font-bold text-gray-600 active:nm-inset transition-all"
+                    >
+                        保存并返回
+                    </button>
                 </div>
             </div>
         </div>

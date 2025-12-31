@@ -27,6 +27,7 @@ export function setAuthToken(token: string | null) {
 /** 解析出的任务项 */
 export interface TaskItem {
     text: string;
+    startDate?: string;
     dueDate: string;
     category: 'history' | 'today' | 'future2' | 'later';
     isArchived: boolean;
@@ -82,8 +83,12 @@ async function request<T>(
 // ==================== AI API ====================
 
 // 获取选择的 AI 提供商
-function getSelectedProvider(): string | undefined {
-    return localStorage.getItem('aiProvider') || undefined;
+function getSelectedTextProvider(): string | undefined {
+    return localStorage.getItem('aiTextProvider') || localStorage.getItem('aiProvider') || undefined;
+}
+
+function getSelectedVoiceProvider(): string | undefined {
+    return localStorage.getItem('aiVoiceProvider') || localStorage.getItem('aiProvider') || undefined;
 }
 
 /**
@@ -94,7 +99,7 @@ function getSelectedProvider(): string | undefined {
 export async function parseTasksFromText(text: string): Promise<TaskItem[]> {
     const response = await request<ParseResponse>('/ai/parse-text', {
         method: 'POST',
-        body: JSON.stringify({ text, provider: getSelectedProvider() }),
+        body: JSON.stringify({ text, provider: getSelectedTextProvider() }),
     });
     return response.items;
 }
@@ -111,7 +116,7 @@ export async function parseTasksFromAudio(
 ): Promise<TaskItem[]> {
     const response = await request<ParseResponse>('/ai/parse-audio', {
         method: 'POST',
-        body: JSON.stringify({ audio: audioBase64, mimeType, provider: getSelectedProvider() }),
+        body: JSON.stringify({ audio: audioBase64, mimeType, provider: getSelectedVoiceProvider() }),
     });
     return response.items;
 }
@@ -124,7 +129,7 @@ export async function parseTasksFromAudio(
 export async function planTasks(input: string): Promise<{ analysis: string; items: TaskItem[] }> {
     const response = await request<PlanResponse>('/ai/plan', {
         method: 'POST',
-        body: JSON.stringify({ input, provider: getSelectedProvider() }),
+        body: JSON.stringify({ input, provider: getSelectedTextProvider() }),
     });
     return {
         analysis: response.analysis,
@@ -146,7 +151,7 @@ export async function chatWithAI(
         body: JSON.stringify({
             messages,
             taskContext,
-            provider: getSelectedProvider()
+            provider: getSelectedTextProvider()
         }),
     });
     return response.result;
@@ -159,7 +164,7 @@ export async function chatWithAI(
 export async function formatText(text: string): Promise<string> {
     const response = await request<{ success: boolean; result: string }>('/ai/format', {
         method: 'POST',
-        body: JSON.stringify({ text, provider: getSelectedProvider() }),
+        body: JSON.stringify({ text, provider: getSelectedTextProvider() }),
     });
     return response.result;
 }
@@ -178,7 +183,7 @@ export async function transcribeAudioSimple(
         body: JSON.stringify({
             audio: audioBase64,
             mimeType,
-            provider: getSelectedProvider()
+            provider: getSelectedVoiceProvider()
         }),
     });
     return response.result;
@@ -240,6 +245,7 @@ export interface TaskResponse {
     id: string;
     text: string;
     details?: string;
+    start_date?: string;
     due_date?: string;
     timeframe?: string;
     archived: boolean;
@@ -274,6 +280,7 @@ export async function getCloudTasks(params?: { timeframe?: string, archived?: bo
 export async function createCloudTask(task: {
     text: string;
     details?: string;
+    start_date?: string;
     due_date?: string;
     timeframe?: string;
     archived?: boolean;
@@ -314,6 +321,7 @@ export async function syncTasksBatch(tasks: any[], strategy: 'merge' | 'replace'
                 id: t.id,
                 text: t.text,
                 details: t.details,
+                start_date: t.startDate,
                 due_date: t.dueDate,
                 timeframe: t.timeframe,
                 archived: t.archived

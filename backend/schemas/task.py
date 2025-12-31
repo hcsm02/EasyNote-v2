@@ -24,6 +24,7 @@ class TaskCreate(BaseModel):
     id: Optional[str] = Field(None, description="任务 ID (可选，用于同步去重)")
     text: str = Field(..., min_length=1, max_length=1000, description="任务内容")
     details: Optional[str] = Field(None, max_length=5000, description="详细描述")
+    start_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="开始日期 YYYY-MM-DD")
     due_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="截止日期 YYYY-MM-DD")
     timeframe: Optional[TimeframeEnum] = Field(None, description="时间分类")
     archived: bool = Field(False, description="是否归档")
@@ -33,6 +34,7 @@ class TaskUpdate(BaseModel):
     """更新任务请求"""
     text: Optional[str] = Field(None, min_length=1, max_length=1000, description="任务内容")
     details: Optional[str] = Field(None, max_length=5000, description="详细描述")
+    start_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="开始日期 YYYY-MM-DD")
     due_date: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="截止日期 YYYY-MM-DD")
     timeframe: Optional[TimeframeEnum] = Field(None, description="时间分类")
     archived: Optional[bool] = Field(None, description="是否归档")
@@ -56,6 +58,7 @@ class TaskResponse(BaseModel):
     id: str
     text: str
     details: Optional[str] = None
+    start_date: Optional[str] = None
     due_date: Optional[str] = None
     timeframe: Optional[str] = None
     archived: bool

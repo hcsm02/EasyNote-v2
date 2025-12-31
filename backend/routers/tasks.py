@@ -70,6 +70,7 @@ async def create_task(
         user_id=current_user.id,
         text=task_data.text,
         details=task_data.details,
+        start_date=task_data.start_date,
         due_date=task_data.due_date,
         timeframe=task_data.timeframe.value if task_data.timeframe else None,
         archived=task_data.archived
@@ -131,6 +132,8 @@ async def update_task(
         task.text = task_data.text
     if task_data.details is not None:
         task.details = task_data.details
+    if task_data.start_date is not None:
+        task.start_date = task_data.start_date
     if task_data.due_date is not None:
         task.due_date = task_data.due_date
     if task_data.timeframe is not None:
@@ -187,6 +190,7 @@ async def create_tasks_batch(
             user_id=current_user.id,
             text=task_data.text,
             details=task_data.details,
+            start_date=task_data.start_date,
             due_date=task_data.due_date,
             timeframe=task_data.timeframe.value if task_data.timeframe else None,
             archived=task_data.archived
@@ -256,6 +260,7 @@ async def sync_tasks(
             user_id=current_user.id,
             text=task_data.text,
             details=task_data.details,
+            start_date=task_data.start_date,
             due_date=task_data.due_date,
             timeframe=task_data.timeframe.value if task_data.timeframe else None,
             archived=task_data.archived

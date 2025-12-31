@@ -27,6 +27,7 @@ const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ task, onClose, onUpda
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isAIAvailable, setIsAIAvailable] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
+  const [startDate, setStartDate] = useState(task.startDate || task.dueDate);
   const [dueDate, setDueDate] = useState(task.dueDate);
   const [isArchived, setIsArchived] = useState(task.archived);
 
@@ -171,7 +172,7 @@ const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ task, onClose, onUpda
   };
 
   const handleSave = () => {
-    onUpdate({ text: title, details, dueDate, archived: isArchived });
+    onUpdate({ text: title, details, startDate, dueDate, archived: isArchived });
     onClose();
   };
 
@@ -220,17 +221,28 @@ const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ task, onClose, onUpda
 
         {/* Metadata Controls: Date and Status */}
         <div className="flex gap-4 mb-5 flex-shrink-0">
-          {/* Date Picker */}
-          <div className="flex-1 nm-inset rounded-[20px] px-4 py-2.5 flex items-center gap-3">
-            <svg className="w-4 h-4 text-[#4D886D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {/* Date Picker Range */}
+          <div className="flex-[2] nm-inset rounded-[20px] px-3 py-2.5 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5 text-[#4D886D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <input
-              type="date"
-              className="bg-transparent text-xs font-bold text-gray-600 focus:outline-none flex-grow"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <input
+                type="date"
+                className="bg-transparent text-[10px] font-bold text-gray-500 focus:outline-none w-[90px]"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                title="开始日期"
+              />
+              <span className="text-gray-300 text-[10px]">至</span>
+              <input
+                type="date"
+                className="bg-transparent text-[10px] font-bold text-gray-700 focus:outline-none w-[90px]"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                title="截止日期"
+              />
+            </div>
           </div>
 
           {/* Status Toggle */}

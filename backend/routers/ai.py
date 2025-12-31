@@ -30,6 +30,7 @@ settings = get_settings()
 class TaskItem(BaseModel):
     """解析出的任务项"""
     text: str
+    startDate: Optional[str] = None
     dueDate: str
     category: str
     isArchived: bool = False

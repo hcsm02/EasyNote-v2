@@ -25,7 +25,8 @@ class Task(Base):
     details = Column(Text, nullable=True)
     
     # 时间相关
-    due_date = Column(String(10), nullable=True)  # YYYY-MM-DD 格式
+    start_date = Column(String(10), nullable=True)  # YYYY-MM-DD 格式
+    due_date = Column(String(10), nullable=True)    # YYYY-MM-DD 格式 (截止日期)
     timeframe = Column(String(20), nullable=True)  # history, today, future2, later
     
     # 状态

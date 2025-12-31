@@ -46,6 +46,17 @@ const AIPlanningPanel: React.FC<AIPlanningPanelProps> = ({ onClose, onAddTasks }
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
     } else {
+      // 检查是否为安全上下文 (HTTPS 或 localhost)
+      if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+        alert('⚠️ 语音录制需要 HTTPS 环境。由于当前使用的是 HTTP 连接，浏览器禁用了麦克风权限。建议使用域名并配置 SSL 证书。');
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('⚠️ 您的浏览器不支持或禁用了麦克风访问。');
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mediaRecorder = new MediaRecorder(stream);
@@ -61,8 +72,14 @@ const AIPlanningPanel: React.FC<AIPlanningPanelProps> = ({ onClose, onAddTasks }
         };
         mediaRecorder.start();
         setIsRecording(true);
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
+        const errorMsg = err.name === 'NotAllowedError'
+          ? '麦克风权限被拒绝，请在浏览器设置中允许访问。'
+          : err.name === 'NotFoundError'
+            ? '未检测到麦克风。'
+            : `无法访问麦克风 (${err.name})`;
+        alert(errorMsg);
       }
     }
   };
@@ -230,9 +247,9 @@ const AIPlanningPanel: React.FC<AIPlanningPanelProps> = ({ onClose, onAddTasks }
                 <div key={idx} className="nm-inset-sm rounded-2xl p-3 flex items-start gap-3 group animate-in slide-in-from-left duration-300" style={{ animationDelay: `${idx * 50}ms` }}>
                   <div className="mt-1 flex-shrink-0">
                     <div className={`w-2 h-2 rounded-full ${task.isArchived ? 'bg-gray-300' :
-                        task.category === 'history' ? 'bg-gray-500' :
-                          task.category === 'today' ? 'bg-orange-400' :
-                            task.category === 'future2' ? 'bg-blue-400' : 'bg-indigo-400'
+                      task.category === 'history' ? 'bg-gray-500' :
+                        task.category === 'today' ? 'bg-orange-400' :
+                          task.category === 'future2' ? 'bg-blue-400' : 'bg-indigo-400'
                       }`} />
                   </div>
                   <div className="flex-1 flex flex-col">

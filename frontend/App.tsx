@@ -281,6 +281,19 @@ const App: React.FC = () => {
   }, [inputMode, isAIPlanningOpen, editingTaskId]);
 
   const startRecording = async () => {
+    // 检查是否为安全上下文 (HTTPS 或 localhost)
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      alert('⚠️ 语音录制需要 HTTPS 环境。由于当前使用的是 HTTP 连接，浏览器禁用了麦克风权限。');
+      setInputMode('none');
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('⚠️ 您的浏览器不支持或禁用了麦克风访问。');
+      setInputMode('none');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -301,8 +314,14 @@ const App: React.FC = () => {
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Microphone access denied:", err);
+      const errorMsg = err.name === 'NotAllowedError'
+        ? '麦克风权限被拒绝，请点击地址栏右侧或左侧的图标重新授权。'
+        : err.name === 'NotFoundError'
+          ? '找不到麦克风设备，请检查硬件连接。'
+          : `无法访问麦克风 (${err.name})，请确保已授予权限。`;
+      alert(errorMsg);
       setInputMode('none');
     }
   };
@@ -439,6 +458,7 @@ const App: React.FC = () => {
       text,
       details: '',
       createdAt: Date.now(),
+      startDate: dateISO,
       dueDate: dateISO,
       timeframe,
       selected: false,
@@ -452,6 +472,7 @@ const App: React.FC = () => {
         const response = await createCloudTask({
           text: newTask.text,
           details: newTask.details,
+          start_date: newTask.startDate,
           due_date: newTask.dueDate,
           timeframe: newTask.timeframe,
           archived: newTask.archived
@@ -471,6 +492,7 @@ const App: React.FC = () => {
       text: '',
       details: '',
       createdAt: Date.now(),
+      startDate: today,
       dueDate: today,
       timeframe: TimeView.TODAY,
       selected: false,
@@ -499,6 +521,7 @@ const App: React.FC = () => {
         text: ct.text,
         details: ct.details || '',
         createdAt: new Date(ct.created_at).getTime(),
+        startDate: ct.start_date || ct.due_date || new Date().toISOString().split('T')[0],
         dueDate: ct.due_date || new Date().toISOString().split('T')[0],
         timeframe: (ct.timeframe as TimeView) || TimeView.TODAY,
         selected: false,
@@ -554,12 +577,13 @@ const App: React.FC = () => {
     }
   };
 
-  const addMultipleTasks = async (items: Array<{ text: string, dueDate: string, category: string, isArchived: boolean }>) => {
+  const addMultipleTasks = async (items: Array<{ text: string, startDate?: string, dueDate: string, category: string, isArchived: boolean }>) => {
     const newTasks: Task[] = items.map(item => ({
       id: Math.random().toString(36).substr(2, 9),
       text: item.text,
       details: '',
       createdAt: Date.now(),
+      startDate: item.startDate || item.dueDate,
       dueDate: item.dueDate,
       timeframe: item.category as TimeView,
       selected: false,
@@ -614,24 +638,34 @@ const App: React.FC = () => {
               ? 'text-indigo-400 hover:text-indigo-600'
               : 'text-gray-300 cursor-not-allowed'
               }`}
-            title={isAIAvailable ? 'AI 智能规划' : 'AI 未配置，请点击下侧设置'}
+            title={isAIAvailable ? 'AI 智能规划' : 'AI 未配置，请点击左侧设置'}
           >
-            <svg className={`w-4 h-4 ${isAIAvailable ? 'animate-pulse' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 ${isAnalyzing ? 'animate-spin' : isAIAvailable ? 'opacity-100' : 'opacity-30'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
             </svg>
           </button>
 
           {/* AI Provider Settings */}
-          <button
-            onClick={() => setIsAISettingsOpen(true)}
-            className="absolute top-2 left-2 w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center text-gray-400 hover:text-indigo-500 transition-all z-10 hover:scale-110 active:nm-inset"
-            title="AI 模型设置"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
+          <div className="absolute top-2 left-2 flex flex-col items-center">
+            <button
+              onClick={() => setIsAISettingsOpen(true)}
+              className="w-8 h-8 nm-raised-sm rounded-full flex items-center justify-center text-gray-400 hover:text-indigo-500 transition-all z-10 hover:scale-110 active:nm-inset"
+              title="AI 模型分工设置"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            <div className="mt-1.5 flex gap-1 opacity-60">
+              <span className="text-[7px] font-black text-indigo-400 bg-[#F2F0E6] px-1 rounded uppercase tracking-tighter scale-90 whitespace-nowrap border border-indigo-100" title="文本解析模型">
+                {localStorage.getItem('aiTextProvider')?.slice(0, 4) || localStorage.getItem('aiProvider')?.slice(0, 4) || 'AI'}
+              </span>
+              <span className="text-[7px] font-black text-gray-400 bg-[#F2F0E6] px-1 rounded uppercase tracking-tighter scale-90 whitespace-nowrap border border-gray-100" title="语音识别模型">
+                {localStorage.getItem('aiVoiceProvider')?.slice(0, 4) || localStorage.getItem('aiProvider')?.slice(0, 4) || 'VO'}
+              </span>
+            </div>
+          </div>
 
           {/* User Profile / Login Button */}
           <button

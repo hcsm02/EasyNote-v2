@@ -61,6 +61,17 @@ def get_ai_config(provider: Optional[str] = None) -> dict:
     }
 
 
+def clean_json_response(text: str) -> str:
+    """清理 AI 返回的 JSON 字符串，特别是去除 Markdown 标记"""
+    text = text.strip()
+    if '```' in text:
+        # 尝试提取 ```json ... ``` 或 ``` ... ``` 之间的内容
+        import re
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if match:
+            return match.group(1).strip()
+    return text
+
 def get_available_providers() -> List[dict]:
     """获取所有已配置 API Key 的可用提供商"""
     # 统一列表
@@ -78,51 +89,74 @@ def get_available_providers() -> List[dict]:
 
 # ==================== Gemini 客户端 ====================
 
+# ==================== Gemini 客户端 (原生 REST 避坑版) ====================
+
 def call_gemini(prompt: str, config: dict) -> str:
-    """调用 Google Gemini API"""
-    import google.generativeai as genai
+    """直接使用 HTTP 请求调用 Gemini，绕过 SDK 的 gRPC/HTTP2 403 坑"""
+    import httpx
     
-    # 如果配置了 base_url，则使用 client_options 配置端点
-    # 注意：google-generativeai 库的 api_endpoint 通常不需要 https://
-    client_kwargs = {"api_key": config["api_key"]}
-    if config.get("base_url"):
-        endpoint = config["base_url"].replace("https://", "").replace("http://", "").split("/")[0]
-        from google.api_core import client_options
-        client_kwargs["client_options"] = client_options.ClientOptions(api_endpoint=endpoint)
+    api_key = config["api_key"]
+    model_name = config["model"]
+    base_url = config.get("base_url") or "https://generativelanguage.googleapis.com"
     
-    genai.configure(**client_kwargs)
-    model = genai.GenerativeModel(config["model"])
+    # 规范化 base_url
+    if not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+    base_url = base_url.rstrip("/")
     
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            response_mime_type="application/json"
-        )
-    )
-    return response.text
+    # 构建请求 URL (支持官方及常见代理路径)
+    url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json"
+        },
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            # 提取文本内容
+            return result['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        print(f"Gemini 原生请求异常: {e}")
+        # 尝试备选 URL 格式 (针对某些 v1 路径代理)
+        if "v1beta" in url:
+            try:
+                url_v1 = url.replace("v1beta", "v1")
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(url_v1, json=payload)
+                    return response.json()['candidates'][0]['content']['parts'][0]['text']
+            except: pass
+        raise e
 
 
 def call_gemini_with_audio(audio_base64: str, mime_type: str, prompt: str, config: dict) -> str:
-    """调用 Gemini API 处理音频"""
+    """音频版也尝试原生 REST (目前先保持 SDK 或简化逻辑)"""
+    # 由于音频处理 Payload 较复杂，暂时沿用 SDK 但加强配置
     import google.generativeai as genai
-    
     client_kwargs = {"api_key": config["api_key"]}
     if config.get("base_url"):
         endpoint = config["base_url"].replace("https://", "").replace("http://", "").split("/")[0]
         from google.api_core import client_options
         client_kwargs["client_options"] = client_options.ClientOptions(api_endpoint=endpoint)
     
-    genai.configure(**client_kwargs)
+    genai.configure(**client_kwargs, transport='rest')
     model = genai.GenerativeModel(config["model"])
     
     response = model.generate_content(
-        [
-            {"mime_type": mime_type, "data": audio_base64},
-            prompt
-        ],
-        generation_config=genai.types.GenerationConfig(
-            response_mime_type="application/json"
-        )
+        [{"mime_type": mime_type, "data": audio_base64}, prompt],
+        generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
     )
     return response.text
 
@@ -186,87 +220,190 @@ def call_ai_with_audio(audio_base64: str, mime_type: str, prompt: str, provider:
 
 # ==================== 业务函数 ====================
 
-async def parse_tasks_from_text(text: str, today_iso: str, today_str: str, provider: Optional[str] = None) -> List[dict]:
-    """解析文本中的任务"""
-    
-    # 计算相对日期示例
+def get_calendar_context(today_iso: str) -> str:
+    """生成未来 14 天及昨天 (-1) 的日历参考，消除偏移"""
     from datetime import datetime, timedelta
     today = datetime.strptime(today_iso, "%Y-%m-%d")
-    tomorrow = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-    day_after = (today + timedelta(days=2)).strftime("%Y-%m-%d")
     
-    prompt = f"""你是一个任务提取助手。今天是 {today_str}（{today_iso}）。
+    current_weekday = today.weekday()
+    next_monday = today + timedelta(days=(7 - current_weekday))
+    next_next_monday = next_monday + timedelta(days=7)
+    
+    calendar_ref = []
+    weekdays_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    
+    # 增加昨天作为参考
+    yesterday = today - timedelta(days=1)
+    calendar_ref.append(f"- {yesterday.strftime('%Y-%m-%d')} 是 {weekdays_cn[yesterday.weekday()]} (昨天, {yesterday.day}号, 历史)")
 
-用户输入: "{text}"
+    for i in range(15):
+        d = today + timedelta(days=i)
+        tags = []
+        if i == 0: tags.append("今天")
+        elif i == 1: tags.append("明天")
+        elif i == 2: tags.append("后天")
+        
+        if d < next_monday:
+            tags.append("本周")
+            tags.append(f"本{weekdays_cn[d.weekday()]}")
+        elif d < next_next_monday:
+            tags.append("下周")
+            tags.append(f"下{weekdays_cn[d.weekday()]}")
+        else:
+            tags.append("下下周")
+        
+        tags.append(f"{d.day}号")
+        
+        tag_str = f"({', '.join(tags)})"
+        calendar_ref.append(f"- {d.strftime('%Y-%m-%d')} 是 {weekdays_cn[d.weekday()]} {tag_str}")
+    return "\n".join(calendar_ref)
 
-请从输入中提取任务，并解析日期词语为具体日期：
-- "今天"、"今日" → {today_iso}
-- "明天"、"明日" → {tomorrow}
-- "后天" → {day_after}
-- 如有具体日期，如"12月30日"，转换为 YYYY-MM-DD
-- 如果没有提到时间，默认为今天
 
-规则：
-1. text: 只保留任务内容，移除时间词语（如"今天开发应用" → "开发应用"）
-2. dueDate: 必须是 YYYY-MM-DD 格式
-3. category: 根据 dueDate 判断 - 'today'(今天) / 'future2'(1-2天内) / 'later'(更远) / 'history'(过去)
-4. isArchived: 状态识别。仅当任务描述明确表示已完成（如使用了“了”、“过”、“完成”、“Done”）时设为 true。注意：即使 dueDate 是过去的时间（如“前天”），如果描述是“打算”、“还没做”、“要做”，isArchived 仍应为 false（表示逾期未完成）。
+async def parse_tasks_from_text(text: str, today_iso: str, today_str: str, provider: Optional[str] = None) -> List[dict]:
+    """解析文本中的任务"""
+    calendar_str = get_calendar_context(today_iso)
 
-严格返回 JSON:
-{{"items": [{{"text": "任务内容", "dueDate": "YYYY-MM-DD", "category": "today", "isArchived": false}}]}}"""
+    # 针对 Gemini 这种对英文指令遵循性更好的模型，使用中英双语 Prompt 增强
+    prompt = f"""You are a task extraction assistant. Today is {today_iso} ({today_str}).
+
+USER INPUT: "{text}"
+
+TASK: Extract all tasks and parse dates. Follow these rules STRICTLY:
+
+1. ABSOLUTE CLEANING (CRITICAL):
+- The "text" field MUST NOT contain any time words, dates, or logical connectives (e.g., today, yesterday, tomorrow, next week, Monday, 2nd, from..to, or, and).
+- text MUST BE pure action.
+
+2. STATE & CATEGORY (CRITICAL):
+- IS_ARCHIVED: If the input uses past tense or markers like "了", "已完成", "做完了" (e.g., "昨天部署了"), set isArchived to true.
+- CATEGORY: 
+  - Date is in the past: "history"
+  - Date is today: "today"
+  - Date is in next 2 days: "future2"
+  - Others: "later"
+
+3. DATE LOOKUP:
+{calendar_str}
+- "Yesterday": Match the tag "历史" or "昨天" in the table above.
+- "A or B": Set startDate to A, dueDate to B.
+
+4. RESPONSE FORMAT (STRICT JSON):
+Return ONLY a JSON object with this structure:
+{{
+  "items": [
+    {{
+      "text": "Task Content",
+      "startDate": "YYYY-MM-DD",
+      "dueDate": "YYYY-MM-DD",
+      "category": "history|today|future2|later",
+      "isArchived": false
+    }}
+  ]
+}}
+"""
 
     try:
         response_text = call_ai(prompt, provider)
-        result = json.loads(response_text)
-        return result.get("items", [])
+        raw_result = json.loads(clean_json_response(response_text))
+        
+        # 兼容处理：如果 AI 返回的是列表直接作为 items
+        raw_items = raw_result.get("items", []) if isinstance(raw_result, dict) else (raw_result if isinstance(raw_result, list) else [])
+        
+        # 键名规范化映射
+        processed_items = []
+        for item in raw_items:
+            processed = {
+                "text": item.get("text") or item.get("content") or "未命名任务",
+                "startDate": item.get("startDate") or item.get("start_date") or item.get("dueDate") or item.get("due_date") or today_iso,
+                "dueDate": item.get("dueDate") or item.get("due_date") or today_iso,
+                "category": item.get("category") or item.get("timeframe") or "today",
+                "isArchived": item.get("isArchived") or item.get("archived") or item.get("is_archived") or False
+            }
+            processed_items.append(processed)
+            
+        return processed_items
     except Exception as e:
-        print(f"AI 解析任务失败: {e}")
-        return [{"text": text, "dueDate": today_iso, "category": "today", "isArchived": False}]
+        print(f"AI 解析任务崩溃: {e}")
+        return [{"text": text, "startDate": today_iso, "dueDate": today_iso, "category": "today", "isArchived": False}]
 
 
 async def parse_tasks_from_audio(audio_base64: str, mime_type: str, today_iso: str, today_str: str, provider: Optional[str] = None) -> List[dict]:
     """从音频中解析任务"""
+    calendar_str = get_calendar_context(today_iso)
     
     prompt = f"""Current Time: {today_str} ({today_iso}). Analyze the spoken input.
+Calendar Reference (Lookup dates/tags here):
+{calendar_str}
 
 Task Processor Rules:
-1. Extract 'text': Task content only, remove temporal markers.
-2. Extract 'dueDate': YYYY-MM-DD, calculate relative to today.
-3. Determine 'category': 'history'/'today'/'future2'/'later'.
-4. Set 'isArchived': true ONLY if the input describes a completed action. Past dates (e.g., "Two days ago I planned to...") do NOT automatically mean isArchived is true if the action itself wasn't finished.
+1. **text**: Task content only, MANDATORY: Remove ALL time-related words (e.g., "today", "yesterday", "tomorrow", "from...to...").
+2. **startDate** and **dueDate**: YYYY-MM-DD. Map terms like 'yesterday' or 'next week' to the tags in the calendar table above.
+3. **Archive & Category (CRITICAL)**: 
+   - set isArchived to true if the input describes a completed action (e.g., using "了", "已做").
+   - if date is in the past, set category to "history".
 
-Return JSON: {{"items": [{{"text": "...", "dueDate": "YYYY-MM-DD", "category": "today|future2|later|history", "isArchived": false}}]}}"""
+Return JSON: {{"items": [{{"text": "...", "startDate": "YYYY-MM-DD", "dueDate": "YYYY-MM-DD", "category": "history|today|future2|later", "isArchived": false}}]}}"""
 
     try:
         response_text = call_ai_with_audio(audio_base64, mime_type, prompt, provider)
-        result = json.loads(response_text)
-        return result.get("items", [])
+        raw_result = json.loads(clean_json_response(response_text))
+        # 同样进行规范化处理... (复用逻辑或简单处理)
+        items = raw_result.get("items", []) if isinstance(raw_result, dict) else []
+        for item in items:
+            if "startDate" not in item: item["startDate"] = item.get("start_date") or item.get("dueDate") or item.get("due_date") or today_iso
+        return items
     except Exception as e:
         print(f"AI 语音解析失败: {e}")
-        return []
+        return [{"text": "语音任务", "startDate": today_iso, "dueDate": today_iso, "category": "today", "isArchived": False}]
 
 
 async def plan_tasks(user_input: str, today_iso: str, today_str: str, provider: Optional[str] = None) -> dict:
     """AI 智能规划任务"""
+    calendar_str = get_calendar_context(today_iso)
     
-    prompt = f"""Today: {today_str} ({today_iso}).
+    prompt = f"""Today is {today_iso} ({today_str}).
+Calendar Reference (Lookup dates/tags here, DO NOT calculate):
+{calendar_str}
 
 User's request: "{user_input}"
 
 You are a productivity assistant. Create a structured task plan.
+Rules:
+1. **text (CRITICAL)**: Title MUST BE pure action. REMOVE ALL time words, dates, and logical connectives (e.g. today, yesterday, tomorrow, next week, Monday, 2nd, from..to, or, and).
+2. **startDate** and **dueDate**: YYYY-MM-DD. Map terms like 'next week' or '2nd' directly to the labels/tags in the calendar table above.
+3. **category**: history, today, future2, or later.
+4. **isArchived**: set true for past actions.
 
 Return JSON:
 {{
     "analysis": "Brief analysis in Chinese",
-    "items": [{{"text": "Task", "dueDate": "YYYY-MM-DD", "category": "today|future2|later", "isArchived": false}}]
+    "items": [{{"text": "Clean action title", "startDate": "YYYY-MM-DD", "dueDate": "YYYY-MM-DD", "category": "history|today|future2|later", "isArchived": false}}]
 }}"""
 
     try:
         response_text = call_ai(prompt, provider)
-        return json.loads(response_text)
+        raw_result = json.loads(clean_json_response(response_text))
+        
+        # 规范化 items
+        items = raw_result.get("items", [])
+        processed_items = []
+        for item in items:
+            processed = {
+                "text": item.get("text") or "规划任务",
+                "startDate": item.get("startDate") or item.get("start_date") or item.get("dueDate") or item.get("due_date") or today_iso,
+                "dueDate": item.get("dueDate") or item.get("due_date") or today_iso,
+                "category": item.get("category") or "today",
+                "isArchived": item.get("isArchived") or False
+            }
+            processed_items.append(processed)
+            
+        return {
+            "analysis": raw_result.get("analysis", "已生成规划"),
+            "items": processed_items
+        }
     except Exception as e:
-        print(f"AI 规划失败: {e}")
-        return {"analysis": f"抱歉，AI 处理出错: {str(e)}", "items": []}
+        print(f"AI 规划崩溃: {e}")
+        return {"analysis": f"抱歉，规划处理出错: {str(e)}", "items": []}
 
 
 async def chat_with_ai(messages: List[dict], task_context: dict, provider: Optional[str] = None) -> str:
@@ -317,11 +454,7 @@ async def format_notes(text: str, provider: Optional[str] = None) -> str:
         return text
 
 
-    try:
-        return call_ai_with_audio(audio_base64, mime_type, prompt, provider)
-    except Exception as e:
-        print(f"AI 语音转录失败: {e}")
-        return ""
+
 
 
 async def transcribe_audio_simple(audio_base64: str, mime_type: str, provider: Optional[str] = None) -> str:
@@ -349,7 +482,7 @@ async def generate_daily_insight(tasks_summary: str, provider: Optional[str] = N
 {{"insight": "评价内容"}}"""
     try:
         response_text = call_ai(prompt, provider)
-        data = json.loads(response_text)
+        data = json.loads(clean_json_response(response_text))
         return data.get("insight", "保持节奏，今天也是新的一天。")
     except Exception as e:
         print(f"AI 生成洞察失败: {e}")

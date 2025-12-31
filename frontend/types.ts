@@ -11,7 +11,8 @@ export interface Task {
   text: string;
   details?: string;
   createdAt: number;
-  dueDate: string; // YYYY-MM-DD
+  startDate?: string; // YYYY-MM-DD
+  dueDate: string;   // YYYY-MM-DD (截止日期)
   timeframe: TimeView;
   selected: boolean;
   archived: boolean;
