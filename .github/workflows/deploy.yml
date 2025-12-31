@@ -27,12 +27,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🏷️ Extract metadata (tags, labels)
+        id: meta
+        run: |
+          # 强制将镜像名称转换为小写
+          echo "IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: 🛠️ Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.IMAGE_REPO }}:latest
           # 确保不使用旧缓存
           no-cache: true
 
