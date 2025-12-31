@@ -3,29 +3,75 @@ name: Deploy EasyNote
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🛠️ Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # 确保不使用旧缓存
+          no-cache: true
+
   deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: 🚀 Deploy to Server
+      - name: 🚀 Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            # 定义变量（转换为小写以匹配 GHCR 标准）
+            IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+            
             cd /aiModels/docker/EasyNote
+            
+            # 更新本地代码（用于获取最新的 Dockerfile 或配置，虽然此时运行的是镜像）
             git pull origin main
-            docker build --no-cache -t easynote:latest .
+            
+            # 停止并删除旧容器
             docker stop easynote || true
             docker rm easynote || true
+            
+            # 删除旧镜像释放空间
+            docker rmi $IMAGE_REPO:latest || true
+            
+            # 拉取新镜像并启动
+            # 注意：如果是私有仓库，需要先 docker login ghcr.io
+            docker pull $IMAGE_REPO:latest
+            
             docker run -d \
               --name easynote \
               -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              easynote:latest
-            echo "✅ EasyNote 部署成功！"
+              $IMAGE_REPO:latest
+            
+            echo "✅ EasyNote 已基于新方案部署成功！"
