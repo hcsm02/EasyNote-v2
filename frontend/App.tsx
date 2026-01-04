@@ -999,8 +999,8 @@ const App: React.FC = () => {
         onCreateNew={handleCreateNew}
       />
 
-      {/* 隐藏的版本水印，用于排查部署是否生效 */}
-      <div className="fixed bottom-1 right-2 text-[6px] text-gray-300 opacity-20 pointer-events-none flex gap-2">
+      {/* 调试信息显示在红框位置 */}
+      <div className="absolute bottom-[80px] left-1/2 -translate-x-1/2 text-[10px] text-gray-500 opacity-50 pointer-events-none flex gap-2 z-50 whitespace-nowrap">
         <span>v2.1.0-20260104-V2</span>
         {user && <span>| UID: {user.id}</span>}
       </div>

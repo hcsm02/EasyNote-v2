@@ -64,24 +64,22 @@ jobs:
             # 1. 物理层 Git 同步 (极速)
             git pull origin main
             
-            # 2. 就地编译前端 (彻底解决 UI 不更新问题)
-            echo "🏗️ 正在就地编译前端网页..."
-            cd frontend && npm install && npm run build && cd ..
+            # 2. 使用 Docker 临时容器编译前端 (避免服务器没装 node 的问题)
+            echo "🏗️ 正在通过容器编译前端网页..."
+            docker run --rm -v /aiModels/docker/EasyNote/frontend:/app -w /app node:18-slim sh -c "npm install && npm run build"
             
             # 3. 重启容器，物理挂载代码和网页
             echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
-            docker run -d \
-              --name easynote \
-              -p 8038:8000 \
+            docker run -d --name easynote -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
               -v /aiModels/docker/EasyNote/backend:/app \
               -v /aiModels/docker/EasyNote/frontend/dist:/app/static \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              $IMAGE_REPO:$IMAGE_TAG || docker run -d --name easynote -p 8038:8000 -v /aiModels/docker/EasyNote/data:/app/data -v /aiModels/docker/EasyNote/backend:/app -v /aiModels/docker/EasyNote/frontend/dist:/app/static --env-file /aiModels/docker/EasyNote/.env --restart unless-stopped python:3.9-slim tail -f /dev/null
+              $IMAGE_REPO:$IMAGE_TAG
             
-            echo "✅ 前后端现已全部通过物理挂载同步！请刷新页面查看 UID。"
+            echo "✅ 前后端现已全部物理挂载成功！"
             docker logs --tail 20 easynote

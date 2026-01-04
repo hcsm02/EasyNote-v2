@@ -56,6 +56,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api/ping")
+async def ping():
+    return {"message": "pong", "boot_id": BOOT_ID}
+
 # 注册路由
 app.include_router(auth_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
