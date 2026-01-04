@@ -1,6 +1,7 @@
 import os
 import fastapi
-from fastapi import FastAPI, Depends, StaticFiles
+from fastapi import FastAPI, Depends
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,7 +14,7 @@ from utils.deps import get_db, get_current_user_optional
 from models.user import User
 
 # 用于验证部署版本的唯一 ID
-BOOT_ID = "BOOT-20260104-1145" 
+BOOT_ID = "BOOT-20260104-1150" 
 
 # 获取配置
 settings = get_settings()
