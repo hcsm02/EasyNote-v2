@@ -30,6 +30,14 @@ async def lifespan(app: FastAPI):
     """
     # 启动时执行
     print("🚀 EasyNote 后端启动中...")
+    
+    # 执行数据库迁移 (补全缺失字段)
+    try:
+        from migrate_db import migrate
+        migrate()
+    except Exception as e:
+        print(f"⚠️ 自动迁移失败: {e}")
+        
     init_db()
     print("✅ 数据库初始化完成")
     
