@@ -1000,8 +1000,9 @@ const App: React.FC = () => {
       />
 
       {/* 隐藏的版本水印，用于排查部署是否生效 */}
-      <div className="fixed bottom-1 right-2 text-[6px] text-gray-300 opacity-20 pointer-events-none">
-        v2.1.0-20260104-V2
+      <div className="fixed bottom-1 right-2 text-[6px] text-gray-300 opacity-20 pointer-events-none flex gap-2">
+        <span>v2.1.0-20260104-V2</span>
+        {user && <span>| UID: {user.id}</span>}
       </div>
     </div>
   );
