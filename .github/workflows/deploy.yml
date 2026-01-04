@@ -55,21 +55,14 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 20m
           script: |
-            # 定义变量
+            # 简化版部署逻辑：仅拉取镜像并重启，排除网络干扰
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
             IMAGE_TAG=${{ github.sha }}
             
-            cd /aiModels/docker/EasyNote
-            git pull origin main
-            
-            # 使用唯一 SHA 标签拉取镜像，强制避开缓存
-            echo "📥 正在拉取版本: $IMAGE_TAG"
+            echo "📥 正在极速拉取新版本镜像: $IMAGE_TAG"
             docker pull $IMAGE_REPO:$IMAGE_TAG
             
-            # 标记为最新的方便后续管理
-            docker tag $IMAGE_REPO:$IMAGE_TAG $IMAGE_REPO:latest
-            
-            echo "🔄 停止旧容器并启动新版本..."
+            echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
@@ -81,13 +74,10 @@ jobs:
               --restart unless-stopped \
               $IMAGE_REPO:$IMAGE_TAG
             
-            # 清理旧镜像
-            docker image prune -af --filter "until=24h"
-            
-            echo "✅ 部署完成！当前镜像 SHA: $IMAGE_TAG"
-            docker inspect --format='{{.Created}}' easynote
-            
-            # 4. 删除旧镜像释放空间
+            # 后台清理，不影响启动速度
             docker image prune -f
+            
+            echo "✅ 部署指令执行完毕！SHA: $IMAGE_TAG"
+            docker inspect --format='{{.Created}}' easynote
             
             echo "✅ EasyNote 已基于新镜像部署成功！"
