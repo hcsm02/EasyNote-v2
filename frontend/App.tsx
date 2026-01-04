@@ -26,7 +26,8 @@ import {
   TaskResponse
 } from './services/api';
 import { User } from './services/api';
-import { getAllTasks, saveAllTasks, isIndexedDBAvailable } from './services/storage';
+// 彻底弃用本地任务缓存，仅保留底层存储项导出以备后用
+// import { getAllTasks, saveAllTasks, isIndexedDBAvailable } from './services/storage';
 
 const App: React.FC = () => {
   // 任务状态 - 初始为空，从本地存储加载
@@ -150,22 +151,18 @@ const App: React.FC = () => {
     const loadTasks = async () => {
       // 检查 Token 并获取用户信息
       const token = localStorage.getItem('token');
-      let isLoggedIn = false;
 
       if (token) {
         try {
           const userData = await getCurrentUser();
           setUser(userData);
-          isLoggedIn = true;
 
-          // 同步用户设置 (喝水数据、AI 模型等)
+          // 同步用户设置
           if (userData.settings_json) {
             try {
               const cloudSettings = JSON.parse(userData.settings_json);
               if (cloudSettings.waterCount !== undefined) setWaterCount(cloudSettings.waterCount);
               if (cloudSettings.waterTarget !== undefined) setWaterTarget(cloudSettings.waterTarget);
-
-              // 同步 AI 模型设置到 LocalStorage 和 State
               if (cloudSettings.aiTextProvider) {
                 localStorage.setItem('aiTextProvider', cloudSettings.aiTextProvider);
                 setAiTextProvider(cloudSettings.aiTextProvider);
@@ -175,87 +172,44 @@ const App: React.FC = () => {
                 setAiVoiceProvider(cloudSettings.aiVoiceProvider);
               }
             } catch (pErr) {
-              console.error('解析用户设置失败:', pErr);
+              console.error('解析配置失败:', pErr);
             }
           }
 
-          // 关键：在拉取云端前，先检查本地是否有未同步的任务并尝试合并
-          if (isIndexedDBAvailable()) {
-            const localTasks = await getAllTasks();
-            if (localTasks.length > 0) {
-              console.log('检测到本地任务，正在尝试与云端同步...');
-              setIsSyncing(true);
-              try {
-                await syncTasksBatch(localTasks, 'merge');
-              } catch (syncErr) {
-                console.error('自动同步本地任务失败:', syncErr);
-              } finally {
-                setIsSyncing(false);
-              }
-            }
-          }
-
-          // 已登录：从云端拉取最新数据
-          try {
-            const cloudTasks = await getCloudTasks();
-            // 转换云端数据格式并计算时间分类
-            const convertedTasks: Task[] = cloudTasks.map((ct: TaskResponse) => ({
-              id: ct.id,
-              text: ct.text,
-              details: ct.details || '',
-              startDate: ct.start_date || ct.due_date || '',
-              dueDate: ct.due_date || '',
-              timeframe: calculateTimeframe(ct.due_date || ''),
-              archived: ct.archived,
-              createdAt: ct.created_at ? new Date(ct.created_at).getTime() : Date.now(),
-              selected: false
-            }));
-            setTasks(convertedTasks);
-            // 同时更新本地缓存
-            if (isIndexedDBAvailable()) {
-              await saveAllTasks(convertedTasks);
-            }
-            setIsDataLoaded(true);
-            return;
-          } catch (cloudErr) {
-            console.error('云端数据加载失败，使用本地缓存:', cloudErr);
-            // 云端失败时回退到本地
-          }
-        } catch (err) {
-          console.error('自动登录失败:', err);
-          setAuthToken(null);
-        }
-      }
-
-      // 未登录或云端失败：从本地存储加载
-      if (!isIndexedDBAvailable()) {
-        console.warn('IndexedDB 不可用，数据将无法持久化');
-        setIsDataLoaded(true);
-        return;
-      }
-      try {
-        const storedTasks = await getAllTasks();
-        if (storedTasks.length > 0) {
-          // 自动校准分类：如果昨天没关电脑跨天了，需要重新计算分类
-          const reCalibratedTasks = storedTasks.map(t => ({
-            ...t,
-            timeframe: calculateTimeframe(t.dueDate)
+          // 直接从云端拉取，不再做本地合并，避免数据冲突
+          const cloudTasks = await getCloudTasks();
+          const convertedTasks: Task[] = cloudTasks.map((ct: TaskResponse) => ({
+            id: ct.id,
+            text: ct.text,
+            details: ct.details || '',
+            startDate: ct.start_date || ct.due_date || '',
+            dueDate: ct.due_date || '',
+            timeframe: calculateTimeframe(ct.due_date || ''),
+            archived: ct.archived,
+            createdAt: ct.created_at ? new Date(ct.created_at).getTime() : Date.now(),
+            selected: false
           }));
-          setTasks(reCalibratedTasks);
+          setTasks(convertedTasks);
+          // 不再保存本地缓存，确保刷新必读云端
+        } catch (err) {
+          console.error('登录加载失败:', err);
+          setAuthToken(null);
+          setIsAuthOpen(true); // 登录失效，显示登录
         }
-      } catch (error) {
-        console.error('加载任务失败:', error);
-      } finally {
-        setIsDataLoaded(true);
+      } else {
+        // 未登录，强制显示登录面板
+        setIsAuthOpen(true);
       }
+      setIsDataLoaded(true);
     };
     loadTasks();
   }, []);
 
-  // 数据变化时自动保存到本地存储
+  // 数据变化时，不再自动保存到本地 IndexedDB，保持云端唯一真理
+  // (仅保留 AI 配置等少量本地持久化以便启动体验)
   useEffect(() => {
     if (!isDataLoaded) return;
-    saveAllTasks(tasks).catch(err => console.error('本地保存失败:', err));
+    // 任务数据不再保存到本地存储，强制每次从云端获取
   }, [tasks, isDataLoaded]);
 
   // 核心同步刷新函数：从云端拉取并覆盖本地
@@ -276,12 +230,9 @@ const App: React.FC = () => {
         selected: false
       }));
       setTasks(convertedTasks);
-      if (isIndexedDBAvailable()) {
-        await saveAllTasks(convertedTasks);
-      }
       console.log('✅ 云端同步完成');
     } catch (err) {
-      console.error('自动同步失败:', err);
+      console.error('自动刷新失败:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -488,6 +439,7 @@ const App: React.FC = () => {
     // 同步到云端
     if (user) {
       try {
+        setIsSyncing(true);
         const backendUpdates: any = {};
         if (updates.text !== undefined) backendUpdates.text = updates.text;
         if (updates.details !== undefined) backendUpdates.details = updates.details;
@@ -500,10 +452,13 @@ const App: React.FC = () => {
         }
 
         await updateCloudTask(id, backendUpdates);
-        // 操作后触发静默同步，保证其他设备也能拿到更新
-        refreshTasksFromCloud();
+        console.log('✅ 云端更新成功');
       } catch (err) {
         console.error('云端更新失败:', err);
+        // 如果失败，可以考虑在这里触发一次全量刷新以校准 UI
+        refreshTasksFromCloud();
+      } finally {
+        setIsSyncing(false);
       }
     }
   };
@@ -514,10 +469,14 @@ const App: React.FC = () => {
 
     if (user) {
       try {
+        setIsSyncing(true);
         await Promise.all(selectedIds.map(id => updateCloudTask(id, { archived: true })));
-        refreshTasksFromCloud();
+        console.log('✅ 批量归档成功');
       } catch (err) {
         console.error('批量归档失败:', err);
+        refreshTasksFromCloud();
+      } finally {
+        setIsSyncing(false);
       }
     }
   };
@@ -542,10 +501,16 @@ const App: React.FC = () => {
 
     if (user) {
       try {
+        setIsSyncing(true);
+        // 关键：等待所有删除请求完成
         await Promise.all(selectedIds.map(id => deleteCloudTask(id)));
-        refreshTasksFromCloud();
+        console.log('✅ 批量删除成功');
       } catch (err) {
         console.error('批量删除失败:', err);
+        // 如果失败，强制拉取云端进行校准
+        refreshTasksFromCloud();
+      } finally {
+        setIsSyncing(false);
       }
     }
   };
@@ -569,6 +534,7 @@ const App: React.FC = () => {
 
     if (user) {
       try {
+        setIsSyncing(true);
         const response = await createCloudTask({
           text: newTask.text,
           details: newTask.details,
@@ -577,11 +543,16 @@ const App: React.FC = () => {
           timeframe: newTask.timeframe,
           archived: newTask.archived
         });
-        // 更新本地 ID 为云端生成的 ID
+        // 关键：立即更新为云端正式生成的 ID，避免后续操作使用临时 ID 导致失效
         setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, id: response.id } : t));
-        refreshTasksFromCloud();
+        console.log('✅ 任务已创建到云端');
       } catch (err) {
         console.error('云端创建失败:', err);
+        // 创建失败时，可以考虑移除本地那个悬挂的任务
+        setTasks(prev => prev.filter(t => t.id !== newTask.id));
+        alert('同步失败，请检查网络后重试');
+      } finally {
+        setIsSyncing(false);
       }
     }
   };
@@ -606,18 +577,13 @@ const App: React.FC = () => {
     setUser(loggedInUser);
     setIsAuthOpen(false);
 
-    // 登录后同步本地数据到云端
+    // 登录后，直接以云端为准
     setIsSyncing(true);
     try {
-      const localTasks = await getAllTasks();
-      if (localTasks.length > 0) {
-        // 简单策略：将本地数据合并到云端
-        await syncTasksBatch(localTasks, 'merge');
-      }
-
-      // 同步完成后从云端重新拉取完整列表
+      // 如果本地有重要数据，可以手动执行一次 merge，
+      // 但为了绝对稳定性，这里我们改为直接强制拉取云端
       const cloudTasks = await getCloudTasks();
-      const unifiedTasks: Task[] = cloudTasks.map(ct => ({
+      const unifiedTasks: Task[] = cloudTasks.map((ct: TaskResponse) => ({
         id: ct.id,
         text: ct.text,
         details: ct.details || '',
@@ -629,13 +595,9 @@ const App: React.FC = () => {
         archived: ct.archived
       }));
       setTasks(unifiedTasks);
-      // 同时确保存储在本地
-      if (isIndexedDBAvailable()) {
-        await saveAllTasks(unifiedTasks);
-      }
-      console.log('✅ 登录后同步完成');
+      console.log('✅ 登录授权同步完成');
     } catch (err) {
-      console.error('登录同步失败:', err);
+      console.error('授权同步失败:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -644,7 +606,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setAuthToken(null);
     setUser(null);
-    // 登出后保留本地数据，不做额外处理
+    setTasks([]); // 登出时清空内存中的任务列表，防止残留
   };
 
   const handleVoiceUpload = async (audioBlob: Blob) => {

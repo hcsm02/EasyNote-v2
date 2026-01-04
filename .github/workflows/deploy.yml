@@ -55,30 +55,39 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 60m
           script: |
-            # 极速稳健部署逻辑：官方镜像加速 + 源码物理挂载
-            # 使用国内可用的镜像加速地址 (如 docker.m.daocloud.io 或直接使用官方标签，前提是服务器已配置镜像源)
-            BASE_IMAGE="python:3.11-slim"
+            # 极速稳健部署逻辑：指定国内镜像源 + 源码物理挂载
+            # 直接使用国内稳定镜像站，避开官方 Hub 的延迟
+            BASE_IMAGE="docker.m.daocloud.io/library/python:3.11-slim"
             
             cd /aiModels/docker/EasyNote
             
-            # 1. 物理层代码更新 (极速)
+            # 1. 物理层代码更新
             echo "📥 正在拉取源码..."
             git pull origin main
             
-            # 2. 拉取基础环境镜像 (官方镜像通常有缓存或国内加速)
-            echo "🚚 正在拉取/检查基础环境镜像 ($BASE_IMAGE)..."
+            # 2. 拉取基础环境镜像 (指定国内加速镜像)
+            echo "🚚 正在拉取/检查国内加速镜像 ($BASE_IMAGE)..."
             docker pull $BASE_IMAGE || echo "⚠️ 拉取失败，尝试使用本地缓存"
             
-            # 3. 使用 Docker 临时容器编译前端
+            # 3. 检查基础镜像
+            if [ -z "$(docker images -q $BASE_IMAGE)" ]; then
+               # 如果加速镜像也没拉下来，尝试最后的保底：搜索本地是否有 python:3.11-slim
+               BASE_IMAGE="python:3.11-slim"
+               if [ -z "$(docker images -q $BASE_IMAGE)" ]; then
+                  echo "❌ 严重错误: 服务器上无可用环境镜像！"
+                  exit 1
+               fi
+            fi
+            
+            # 4. 后台构建前端
             echo "🏗️ 正在通过容器编译前端网页..."
             docker run --rm -v /aiModels/docker/EasyNote/frontend:/app -w /app node:18-slim sh -c "npm install --prefer-offline --no-audit && npm run build"
             
-            # 4. 秒速重启容器 (停机时间仅需 2-3 秒)
+            # 5. 重启服务
             echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
-            # 使用官方 Python 镜像，手动指定启动命令
             docker run -d --name easynote -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
               -v /aiModels/docker/EasyNote/backend:/app \
