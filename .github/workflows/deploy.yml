@@ -53,38 +53,44 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 20m
+          command_timeout: 60m
           script: |
-            # 极速部署逻辑：零停机 & 物理挂载
-            IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+            # 极速稳健部署逻辑：官方镜像加速 + 源码物理挂载
+            # 使用国内可用的镜像加速地址 (如 docker.m.daocloud.io 或直接使用官方标签，前提是服务器已配置镜像源)
+            BASE_IMAGE="python:3.11-slim"
             
             cd /aiModels/docker/EasyNote
             
-            # 1. 物理层 Git 同步 (极速)
+            # 1. 物理层代码更新 (极速)
+            echo "📥 正在拉取源码..."
             git pull origin main
             
-            # 2. 提前拉取镜像 (此时旧容器仍在运行，保证不掉线)
-            echo "🚚 正在后台拉取环境镜像..."
-            docker pull $IMAGE_REPO:latest
+            # 2. 拉取基础环境镜像 (官方镜像通常有缓存或国内加速)
+            echo "🚚 正在拉取/检查基础环境镜像 ($BASE_IMAGE)..."
+            docker pull $BASE_IMAGE || echo "⚠️ 拉取失败，尝试使用本地缓存"
             
             # 3. 使用 Docker 临时容器编译前端
             echo "🏗️ 正在通过容器编译前端网页..."
-            docker run --rm -v /aiModels/docker/EasyNote/frontend:/app -w /app node:18-slim sh -c "npm install && npm run build"
+            docker run --rm -v /aiModels/docker/EasyNote/frontend:/app -w /app node:18-slim sh -c "npm install --prefer-offline --no-audit && npm run build"
             
-            # 4. 秒速轮转服务 (停机时间仅需 2-3 秒)
+            # 4. 秒速重启容器 (停机时间仅需 2-3 秒)
             echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
+            # 使用官方 Python 镜像，手动指定启动命令
             docker run -d --name easynote -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
               -v /aiModels/docker/EasyNote/backend:/app \
               -v /aiModels/docker/EasyNote/frontend/dist:/app/static \
+              -w /app \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              $IMAGE_REPO:latest
+              $BASE_IMAGE \
+              sh -c "pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && uvicorn main:app --host 0.0.0.0 --port 8000"
             
-            echo "✅ 部署完成！"
-            echo "🔍 服务器本地代码校验 (BOOT_ID):"
+            echo "✅ 部署已完成！极速上线成功。"
+            docker ps | grep easynote
+            echo "🔍 服务器代码校验 (BOOT_ID):"
             grep "BOOT_ID =" backend/main.py
             docker logs --tail 20 easynote
