@@ -52,26 +52,26 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 20m  # 将 SSH 命令超时增加到 20 分钟
           script: |
             # 定义变量（转换为小写以匹配 GHCR 标准）
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
             
             cd /aiModels/docker/EasyNote
             
-            # 更新本地代码（用于获取最新的 Dockerfile 或配置，虽然此时运行的是镜像）
+            # 更新本地代码（用于获取最新的 Dockerfile 或配置）
             git pull origin main
             
-            # 停止并删除旧容器
+            # 1. 先尝试拉取新镜像，拉取失败直接停止，不影响旧容器运行
+            echo "📥 开始拉取新镜像..."
+            docker pull $IMAGE_REPO:latest
+            
+            # 2. 拉取成功后，停止并删除旧容器
+            echo "🔄 停止并重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
-            # 删除旧镜像释放空间
-            docker rmi $IMAGE_REPO:latest || true
-            
-            # 拉取新镜像并启动
-            # 注意：如果是私有仓库，需要先 docker login ghcr.io
-            docker pull $IMAGE_REPO:latest
-            
+            # 3. 启动新容器
             docker run -d \
               --name easynote \
               -p 8038:8000 \
@@ -80,4 +80,7 @@ jobs:
               --restart unless-stopped \
               $IMAGE_REPO:latest
             
-            echo "✅ EasyNote 已基于新方案部署成功！"
+            # 4. 删除旧镜像释放空间
+            docker image prune -f
+            
+            echo "✅ EasyNote 已基于新镜像部署成功！"
