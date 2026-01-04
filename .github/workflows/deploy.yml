@@ -55,35 +55,35 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 20m
           script: |
-            # 简化版部署逻辑：仅拉取镜像并重启，排除网络干扰
+            # 极速部署逻辑：国内加速镜像 + 源码物理挂载
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
             IMAGE_TAG=${{ github.sha }}
+            MIRROR_REPO="ghcr.nju.edu.cn/$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
             
-            echo "📥 正在极速拉取新版本镜像: $IMAGE_TAG"
-            docker pull $IMAGE_REPO:$IMAGE_TAG
+            cd /aiModels/docker/EasyNote
             
-            echo "🔄 正在秒速重启服务..."
+            # 1. 物理层 Git 同步 (极速)
+            git pull origin main
+            
+            # 2. 尝试从南京大学镜像源拉取 (更快)
+            echo "📥 正在拉取镜像环境..."
+            docker pull $MIRROR_REPO:$IMAGE_TAG || docker pull $IMAGE_REPO:$IMAGE_TAG
+            
+            echo "🔄 正在秒速重启服务 (源码已同步)..."
             docker stop easynote || true
             docker rm easynote || true
             
+            # 关键：将宿主机的 backend 文件夹 挂载到容器内，实现代码免下载秒更新
             docker run -d \
               --name easynote \
               -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
+              -v /aiModels/docker/EasyNote/backend:/app \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
               $IMAGE_REPO:$IMAGE_TAG
             
-            # 后台清理，不影响启动速度
             docker image prune -f
             
-            echo "🔍 检查容器状态..."
-            docker ps -a | grep easynote
-            
-            echo "📋 正在获取容器最后 20 行日志..."
+            echo "✅ 部署指令已下达！本次已开启源码直接挂载，后端改动将立即生效。"
             docker logs --tail 20 easynote
-            
-            echo "✅ 部署指令执行完毕！SHA: $IMAGE_TAG"
-            docker inspect --format='创建时间: {{.Created}}' easynote
-            
-            echo "✅ EasyNote 已启动。请访问: http://120.24.168.78:8038"
