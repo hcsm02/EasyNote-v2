@@ -224,7 +224,7 @@ const App: React.FC = () => {
         details: ct.details || '',
         startDate: ct.start_date || ct.due_date || '',
         dueDate: ct.due_date || '',
-        timeframe: calculateTimeframe(ct.due_date || ''),
+        timeframe: calculateTimeframe(ct.due_date || ct.start_date || ''), // 强制重新计算，不信任服务器过期的静态分类
         archived: ct.archived,
         createdAt: ct.created_at ? new Date(ct.created_at).getTime() : Date.now(),
         selected: false
@@ -372,27 +372,36 @@ const App: React.FC = () => {
   };
 
   const calculateTimeframe = (dateISO: string): TimeView => {
-    // 使用统一的 ISO 格式获取今天日期 (YYYY-MM-DD)
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (!dateISO) return TimeView.TODAY; // 容错处理
 
-    // 确保传入的也是标准的 YYYY-MM-DD
-    const targetDateObj = new Date(dateISO);
-    const targetStr = `${targetDateObj.getFullYear()}-${String(targetDateObj.getMonth() + 1).padStart(2, '0')}-${String(targetDateObj.getDate()).padStart(2, '0')}`;
+    try {
+      // 使用统一的 ISO 格式获取今天日期 (YYYY-MM-DD)
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    if (targetStr < todayStr) return TimeView.HISTORY;
-    if (targetStr === todayStr) return TimeView.TODAY;
+      // 确保传入的也是标准的 YYYY-MM-DD
+      const targetDateObj = new Date(dateISO);
+      if (isNaN(targetDateObj.getTime())) return TimeView.TODAY; // 无效日期处理
 
-    // 计算未来天数
-    const todayObj = new Date();
-    todayObj.setHours(0, 0, 0, 0);
-    const targetDateObjClean = new Date(dateISO);
-    targetDateObjClean.setHours(0, 0, 0, 0);
+      const targetStr = `${targetDateObj.getFullYear()}-${String(targetDateObj.getMonth() + 1).padStart(2, '0')}-${String(targetDateObj.getDate()).padStart(2, '0')}`;
 
-    const diffDays = Math.round((targetDateObjClean.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24));
+      if (targetStr < todayStr) return TimeView.HISTORY;
+      if (targetStr === todayStr) return TimeView.TODAY;
 
-    if (diffDays <= 2) return TimeView.FUTURE2;
-    return TimeView.LATER;
+      // 计算未来天数
+      const todayObj = new Date();
+      todayObj.setHours(0, 0, 0, 0);
+      const targetDateObjClean = new Date(dateISO);
+      targetDateObjClean.setHours(0, 0, 0, 0);
+
+      const diffDays = Math.round((targetDateObjClean.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (diffDays <= 2) return TimeView.FUTURE2;
+      return TimeView.LATER;
+    } catch (e) {
+      console.error('日期计算错误:', e);
+      return TimeView.TODAY;
+    }
   };
 
   // 同步用户设置到云端 (喝水、模型等)
@@ -590,7 +599,7 @@ const App: React.FC = () => {
         createdAt: new Date(ct.created_at).getTime(),
         startDate: ct.start_date || ct.due_date || new Date().toISOString().split('T')[0],
         dueDate: ct.due_date || new Date().toISOString().split('T')[0],
-        timeframe: (ct.timeframe as TimeView) || TimeView.TODAY,
+        timeframe: calculateTimeframe(ct.due_date || ct.start_date || ''), // 核心修复：这里也必须动态计算，不能信任服务器存储的旧分类
         selected: false,
         archived: ct.archived
       }));
@@ -674,7 +683,7 @@ const App: React.FC = () => {
           createdAt: new Date(ct.created_at).getTime(),
           startDate: ct.start_date || ct.due_date || new Date().toISOString().split('T')[0],
           dueDate: ct.due_date || new Date().toISOString().split('T')[0],
-          timeframe: calculateTimeframe(ct.due_date || ''), // 使用标准化函数重新校准分类
+          timeframe: calculateTimeframe(ct.due_date || ct.start_date || ''), // 统一使用动态计算
           selected: false,
           archived: ct.archived
         }));
