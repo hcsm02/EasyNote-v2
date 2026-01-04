@@ -999,9 +999,9 @@ const App: React.FC = () => {
         onCreateNew={handleCreateNew}
       />
 
-      {/* 调试信息显示在红框位置 */}
-      <div className="absolute bottom-[80px] left-1/2 -translate-x-1/2 text-[10px] text-gray-500 opacity-50 pointer-events-none flex gap-2 z-50 whitespace-nowrap">
-        <span>v2.1.0-20260104-V2</span>
+      {/* 强力调试水印：红色、固定位置 */}
+      <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 text-[12px] text-red-600 font-bold z-[9999] bg-white/80 px-2 py-1 rounded shadow-sm flex gap-2">
+        <span>VER: V2-TEST-999</span>
         {user && <span>| UID: {user.id}</span>}
       </div>
     </div>

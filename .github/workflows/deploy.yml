@@ -82,4 +82,6 @@ jobs:
               $IMAGE_REPO:$IMAGE_TAG
             
             echo "✅ 前后端现已全部物理挂载成功！"
+            echo "🔍 服务器本地代码校验 (BOOT_ID):"
+            grep "BOOT_ID =" backend/main.py
             docker logs --tail 20 easynote
