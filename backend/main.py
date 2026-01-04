@@ -1,21 +1,19 @@
-"""
-EasyNote 后端入口
-FastAPI 应用配置和启动
-"""
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from contextlib import asynccontextmanager
 import os
+import fastapi
+from fastapi import FastAPI, Depends, StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from typing import Optional
+from sqlalchemy.orm import Session
 
 from config import get_settings
 from database import init_db
 from routers import auth_router, tasks_router, ai_router
 from utils.deps import get_db, get_current_user_optional
 from models.user import User
-from sqlalchemy.orm import Session
-from typing import Optional
+
+# 用于验证部署版本的唯一 ID
+BOOT_ID = "BOOT-20260104-1145" 
 
 # 获取配置
 settings = get_settings()
@@ -107,6 +105,7 @@ async def debug_db(
             db_path = os.path.abspath(db_path)
             
     return {
+        "boot_id": BOOT_ID,
         "debug_version": "2026-01-04-V2-FIX",  # 用于校验代码是否更新
         "database_url_configured": settings.DATABASE_URL,
         "database_url_actual": db_url,

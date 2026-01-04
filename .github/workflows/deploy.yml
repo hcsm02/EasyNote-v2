@@ -77,7 +77,13 @@ jobs:
             # 后台清理，不影响启动速度
             docker image prune -f
             
-            echo "✅ 部署指令执行完毕！SHA: $IMAGE_TAG"
-            docker inspect --format='{{.Created}}' easynote
+            echo "🔍 检查容器状态..."
+            docker ps -a | grep easynote
             
-            echo "✅ EasyNote 已基于新镜像部署成功！"
+            echo "📋 正在获取容器最后 20 行日志..."
+            docker logs --tail 20 easynote
+            
+            echo "✅ 部署指令执行完毕！SHA: $IMAGE_TAG"
+            docker inspect --format='创建时间: {{.Created}}' easynote
+            
+            echo "✅ EasyNote 已启动。请访问: http://120.24.168.78:8038"
