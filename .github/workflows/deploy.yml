@@ -73,17 +73,24 @@ jobs:
             docker stop easynote || true
             docker rm easynote || true
             
-            # 关键：将宿主机的 backend 文件夹 挂载到容器内，实现代码免下载秒更新
+            # 关键：精准挂载。只挂载代码子目录，不遮挡镜像里的 static 文件夹（前端）
             docker run -d \
               --name easynote \
               -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
-              -v /aiModels/docker/EasyNote/backend:/app \
+              -v /aiModels/docker/EasyNote/backend/main.py:/app/main.py \
+              -v /aiModels/docker/EasyNote/backend/routers:/app/routers \
+              -v /aiModels/docker/EasyNote/backend/models:/app/models \
+              -v /aiModels/docker/EasyNote/backend/database.py:/app/database.py \
+              -v /aiModels/docker/EasyNote/backend/config.py:/app/config.py \
+              -v /aiModels/docker/EasyNote/backend/utils:/app/utils \
+              -v /aiModels/docker/EasyNote/backend/schemas:/app/schemas \
+              -v /aiModels/docker/EasyNote/backend/services:/app/services \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
               $IMAGE_REPO:$IMAGE_TAG
             
             docker image prune -f
             
-            echo "✅ 部署指令已下达！本次已开启源码直接挂载，后端改动将立即生效。"
+            echo "✅ 挂载已精细化！网页和后端现在均已就绪。"
             docker logs --tail 20 easynote
