@@ -38,8 +38,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.IMAGE_REPO }}:latest
-          # 确保不使用旧缓存
+          tags: |
+            ${{ env.IMAGE_REPO }}:latest
+            ${{ env.IMAGE_REPO }}:${{ github.sha }}
           no-cache: true
 
   deploy:
@@ -52,33 +53,39 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 20m  # 将 SSH 命令超时增加到 20 分钟
+          command_timeout: 20m
           script: |
-            # 定义变量（转换为小写以匹配 GHCR 标准）
+            # 定义变量
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_TAG=${{ github.sha }}
             
             cd /aiModels/docker/EasyNote
-            
-            # 更新本地代码（用于获取最新的 Dockerfile 或配置）
             git pull origin main
             
-            # 1. 先尝试拉取新镜像，拉取失败直接停止，不影响旧容器运行
-            echo "📥 开始拉取新镜像..."
-            docker pull $IMAGE_REPO:latest
+            # 使用唯一 SHA 标签拉取镜像，强制避开缓存
+            echo "📥 正在拉取版本: $IMAGE_TAG"
+            docker pull $IMAGE_REPO:$IMAGE_TAG
             
-            # 2. 拉取成功后，停止并删除旧容器
-            echo "🔄 停止并重启服务..."
+            # 标记为最新的方便后续管理
+            docker tag $IMAGE_REPO:$IMAGE_TAG $IMAGE_REPO:latest
+            
+            echo "🔄 停止旧容器并启动新版本..."
             docker stop easynote || true
             docker rm easynote || true
             
-            # 3. 启动新容器
             docker run -d \
               --name easynote \
               -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              $IMAGE_REPO:latest
+              $IMAGE_REPO:$IMAGE_TAG
+            
+            # 清理旧镜像
+            docker image prune -af --filter "until=24h"
+            
+            echo "✅ 部署完成！当前镜像 SHA: $IMAGE_TAG"
+            docker inspect --format='{{.Created}}' easynote
             
             # 4. 删除旧镜像释放空间
             docker image prune -f

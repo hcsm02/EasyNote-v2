@@ -35,6 +35,8 @@ const App: React.FC = () => {
 
   const [waterCount, setWaterCount] = useState(0);
   const [waterTarget, setWaterTarget] = useState(8);
+  const [aiTextProvider, setAiTextProvider] = useState<string>(localStorage.getItem('aiTextProvider') || localStorage.getItem('aiProvider') || 'AI');
+  const [aiVoiceProvider, setAiVoiceProvider] = useState<string>(localStorage.getItem('aiVoiceProvider') || localStorage.getItem('aiProvider') || 'VO');
 
   const [currentTimeView, setCurrentTimeView] = useState<TimeView>(TimeView.TODAY);
   const [inputMode, setInputMode] = useState<InputMode>('none');
@@ -163,12 +165,33 @@ const App: React.FC = () => {
               if (cloudSettings.waterCount !== undefined) setWaterCount(cloudSettings.waterCount);
               if (cloudSettings.waterTarget !== undefined) setWaterTarget(cloudSettings.waterTarget);
 
-              // 同步 AI 模型设置到 LocalStorage (供 api.ts 使用)
-              if (cloudSettings.aiTextProvider) localStorage.setItem('aiTextProvider', cloudSettings.aiTextProvider);
-              if (cloudSettings.aiVoiceProvider) localStorage.setItem('aiVoiceProvider', cloudSettings.aiVoiceProvider);
-              if (cloudSettings.aiProvider) localStorage.setItem('aiProvider', cloudSettings.aiProvider);
+              // 同步 AI 模型设置到 LocalStorage 和 State
+              if (cloudSettings.aiTextProvider) {
+                localStorage.setItem('aiTextProvider', cloudSettings.aiTextProvider);
+                setAiTextProvider(cloudSettings.aiTextProvider);
+              }
+              if (cloudSettings.aiVoiceProvider) {
+                localStorage.setItem('aiVoiceProvider', cloudSettings.aiVoiceProvider);
+                setAiVoiceProvider(cloudSettings.aiVoiceProvider);
+              }
             } catch (pErr) {
               console.error('解析用户设置失败:', pErr);
+            }
+          }
+
+          // 关键：在拉取云端前，先检查本地是否有未同步的任务并尝试合并
+          if (isIndexedDBAvailable()) {
+            const localTasks = await getAllTasks();
+            if (localTasks.length > 0) {
+              console.log('检测到本地任务，正在尝试与云端同步...');
+              setIsSyncing(true);
+              try {
+                await syncTasksBatch(localTasks, 'merge');
+              } catch (syncErr) {
+                console.error('自动同步本地任务失败:', syncErr);
+              } finally {
+                setIsSyncing(false);
+              }
             }
           }
 
@@ -409,6 +432,10 @@ const App: React.FC = () => {
 
       const updatedUser = await updateCurrentUser({ settings_json: settingsStr });
       setUser(updatedUser);
+
+      // 更新本地状态以确保 UI 即时反映
+      if (updates.aiTextProvider) setAiTextProvider(updates.aiTextProvider);
+      if (updates.aiVoiceProvider) setAiVoiceProvider(updates.aiVoiceProvider);
     } catch (err) {
       console.error('同步设置到云端失败:', err);
     }
@@ -711,10 +738,10 @@ const App: React.FC = () => {
             </button>
             <div className="mt-1.5 flex gap-1 opacity-60">
               <span className="text-[7px] font-black text-indigo-400 bg-[#F2F0E6] px-1 rounded uppercase tracking-tighter scale-90 whitespace-nowrap border border-indigo-100" title="文本解析模型">
-                {localStorage.getItem('aiTextProvider')?.slice(0, 4) || localStorage.getItem('aiProvider')?.slice(0, 4) || 'AI'}
+                {aiTextProvider.slice(0, 4)}
               </span>
               <span className="text-[7px] font-black text-gray-400 bg-[#F2F0E6] px-1 rounded uppercase tracking-tighter scale-90 whitespace-nowrap border border-gray-100" title="语音识别模型">
-                {localStorage.getItem('aiVoiceProvider')?.slice(0, 4) || localStorage.getItem('aiProvider')?.slice(0, 4) || 'VO'}
+                {aiVoiceProvider.slice(0, 4)}
               </span>
             </div>
           </div>
@@ -971,6 +998,11 @@ const App: React.FC = () => {
         onAppViewSwitch={setCurrentAppView}
         onCreateNew={handleCreateNew}
       />
+
+      {/* 隐藏的版本水印，用于排查部署是否生效 */}
+      <div className="fixed bottom-1 right-2 text-[6px] text-gray-300 opacity-20 pointer-events-none">
+        v2.1.0-20260104-V2
+      </div>
     </div>
   );
 };
