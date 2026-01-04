@@ -1050,7 +1050,8 @@ const App: React.FC = () => {
                 setTasks(converted);
                 alert('✅ 同步成功！数据已与云端对齐。');
               } catch (e: any) {
-                alert('❌ 同步失败: ' + (e.message || '网络错误'));
+                console.error('Manual Sync Error:', e);
+                alert('❌ 同步失败：' + (e.message || '未知错误'));
               } finally {
                 setIsSyncing(false);
               }
