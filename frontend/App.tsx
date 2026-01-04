@@ -999,10 +999,72 @@ const App: React.FC = () => {
         onCreateNew={handleCreateNew}
       />
 
-      {/* 强力调试水印：红色、固定位置 */}
-      <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 text-[12px] text-red-600 font-bold z-[9999] bg-white/80 px-2 py-1 rounded shadow-sm flex gap-2">
-        <span>VER: V2-TEST-999</span>
-        {user && <span>| UID: {user.id}</span>}
+      {/* 强力调试诊断面板 */}
+      <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 z-[9999] bg-white/95 border-2 border-red-500 p-3 rounded-xl shadow-2xl flex flex-col gap-2 min-w-[280px]">
+        <div className="text-[12px] font-bold text-red-600 flex justify-between items-center border-b pb-1">
+          <span>EasyNote 诊断面板 (V2-TEST-P3)</span>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-gray-100 px-2 py-0.5 rounded border active:bg-gray-200"
+          >
+            重启 App
+          </button>
+        </div>
+
+        <div className="text-[10px] space-y-1 text-gray-700">
+          <div className="flex justify-between">
+            <span className="font-semibold text-gray-500">我的 UID:</span>
+            <span className="font-mono text-blue-600 select-all">{user?.id || '未登录'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-semibold text-gray-500">任务总数:</span>
+            <span className="font-bold">{tasks.length} (本地)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-semibold text-gray-500">同步状态:</span>
+            <span className={`${isSyncing ? 'text-blue-500 animate-pulse' : 'text-green-600'}`}>
+              {isSyncing ? '正在拼命同步...' : '空闲'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          <button
+            onClick={async () => {
+              setIsSyncing(true);
+              try {
+                console.log('🚀 开始强制手动同步...');
+                await syncTasksBatch(tasks, 'merge');
+                const cloud = await getCloudTasks();
+                const converted = cloud.map(ct => ({
+                  id: ct.id,
+                  text: ct.text,
+                  details: ct.details || '',
+                  startDate: ct.start_date || ct.due_date || '',
+                  dueDate: ct.due_date || '',
+                  timeframe: calculateTimeframe(ct.due_date || ''),
+                  archived: ct.archived,
+                  createdAt: new Date(ct.created_at).getTime(),
+                  selected: false
+                }));
+                setTasks(converted);
+                alert('✅ 同步成功！数据已与云端对齐。');
+              } catch (e: any) {
+                alert('❌ 同步失败: ' + (e.message || '网络错误'));
+              } finally {
+                setIsSyncing(false);
+              }
+            }}
+            disabled={!user || isSyncing}
+            className="col-span-2 bg-red-500 text-white text-[12px] py-2 rounded-lg font-bold shadow-md hover:bg-red-600 active:scale-95 disabled:opacity-50"
+          >
+            强制【手动同步】 (合并云端)
+          </button>
+        </div>
+
+        <div className="text-[8px] text-gray-400 text-center mt-1">
+          提示：如果数据不同，请两端各点一次此按钮
+        </div>
       </div>
     </div>
   );

@@ -228,6 +228,8 @@ async def sync_tasks(
     if sync_data.merge_strategy == "replace":
         db.query(Task).filter(Task.user_id == current_user.id).delete()
     
+    print(f"🔄 [Sync] User {current_user.id} syncing {len(sync_data.tasks)} tasks. Strategy: {sync_data.merge_strategy}")
+    
     # 添加新任务
     for task_data in sync_data.tasks:
         # 去重逻辑：如果提供了 ID 且已存在，或者内容（文本+日期）完全一致且属于该用户，则跳过
@@ -252,6 +254,7 @@ async def sync_tasks(
         if existing_task:
             # 如果已存在，记录 ID 但不新建
             task_ids.append(existing_task.id)
+            print(f"⏭️ [Sync] Task already exists: {task_data.text[:20]}...")
             continue
             
         # 创建新任务
@@ -267,8 +270,10 @@ async def sync_tasks(
         )
         db.add(new_task)
         task_ids.append(new_task.id)
+        print(f"✨ [Sync] Created/Merged task: {task_data.text[:20]}...")
     
     db.commit()
+    print(f"✅ [Sync] Successfully committed {len(task_ids)} tasks for user {current_user.id}")
     
     return TaskBatchResponse(
         success=True,
