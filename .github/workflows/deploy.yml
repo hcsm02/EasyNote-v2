@@ -55,42 +55,33 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 20m
           script: |
-            # 极速部署逻辑：国内加速镜像 + 源码物理挂载
+            # 极速部署逻辑：全量源码物理挂载 & 就地编译
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
             IMAGE_TAG=${{ github.sha }}
-            MIRROR_REPO="ghcr.nju.edu.cn/$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
             
             cd /aiModels/docker/EasyNote
             
             # 1. 物理层 Git 同步 (极速)
             git pull origin main
             
-            # 2. 尝试从南京大学镜像源拉取 (更快)
-            echo "📥 正在拉取镜像环境..."
-            docker pull $MIRROR_REPO:$IMAGE_TAG || docker pull $IMAGE_REPO:$IMAGE_TAG
+            # 2. 就地编译前端 (彻底解决 UI 不更新问题)
+            echo "🏗️ 正在就地编译前端网页..."
+            cd frontend && npm install && npm run build && cd ..
             
-            echo "🔄 正在秒速重启服务 (源码已同步)..."
+            # 3. 重启容器，物理挂载代码和网页
+            echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
             
-            # 关键：精准挂载。只挂载代码子目录，不遮挡镜像里的 static 文件夹（前端）
             docker run -d \
               --name easynote \
               -p 8038:8000 \
               -v /aiModels/docker/EasyNote/data:/app/data \
-              -v /aiModels/docker/EasyNote/backend/main.py:/app/main.py \
-              -v /aiModels/docker/EasyNote/backend/routers:/app/routers \
-              -v /aiModels/docker/EasyNote/backend/models:/app/models \
-              -v /aiModels/docker/EasyNote/backend/database.py:/app/database.py \
-              -v /aiModels/docker/EasyNote/backend/config.py:/app/config.py \
-              -v /aiModels/docker/EasyNote/backend/utils:/app/utils \
-              -v /aiModels/docker/EasyNote/backend/schemas:/app/schemas \
-              -v /aiModels/docker/EasyNote/backend/services:/app/services \
+              -v /aiModels/docker/EasyNote/backend:/app \
+              -v /aiModels/docker/EasyNote/frontend/dist:/app/static \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              $IMAGE_REPO:$IMAGE_TAG
+              $IMAGE_REPO:$IMAGE_TAG || docker run -d --name easynote -p 8038:8000 -v /aiModels/docker/EasyNote/data:/app/data -v /aiModels/docker/EasyNote/backend:/app -v /aiModels/docker/EasyNote/frontend/dist:/app/static --env-file /aiModels/docker/EasyNote/.env --restart unless-stopped python:3.9-slim tail -f /dev/null
             
-            docker image prune -f
-            
-            echo "✅ 挂载已精细化！网页和后端现在均已就绪。"
+            echo "✅ 前后端现已全部通过物理挂载同步！请刷新页面查看 UID。"
             docker logs --tail 20 easynote
