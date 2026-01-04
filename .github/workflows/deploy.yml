@@ -55,20 +55,23 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           command_timeout: 20m
           script: |
-            # 极速部署逻辑：全量源码物理挂载 & 就地编译
+            # 极速部署逻辑：零停机 & 物理挂载
             IMAGE_REPO=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-            IMAGE_TAG=${{ github.sha }}
             
             cd /aiModels/docker/EasyNote
             
             # 1. 物理层 Git 同步 (极速)
             git pull origin main
             
-            # 2. 使用 Docker 临时容器编译前端 (避免服务器没装 node 的问题)
+            # 2. 提前拉取镜像 (此时旧容器仍在运行，保证不掉线)
+            echo "🚚 正在后台拉取环境镜像..."
+            docker pull $IMAGE_REPO:latest
+            
+            # 3. 使用 Docker 临时容器编译前端
             echo "🏗️ 正在通过容器编译前端网页..."
             docker run --rm -v /aiModels/docker/EasyNote/frontend:/app -w /app node:18-slim sh -c "npm install && npm run build"
             
-            # 3. 重启容器，物理挂载代码和网页
+            # 4. 秒速轮转服务 (停机时间仅需 2-3 秒)
             echo "🔄 正在秒速重启服务..."
             docker stop easynote || true
             docker rm easynote || true
@@ -79,9 +82,9 @@ jobs:
               -v /aiModels/docker/EasyNote/frontend/dist:/app/static \
               --env-file /aiModels/docker/EasyNote/.env \
               --restart unless-stopped \
-              $IMAGE_REPO:$IMAGE_TAG
+              $IMAGE_REPO:latest
             
-            echo "✅ 前后端现已全部物理挂载成功！"
+            echo "✅ 部署完成！"
             echo "🔍 服务器本地代码校验 (BOOT_ID):"
             grep "BOOT_ID =" backend/main.py
             docker logs --tail 20 easynote

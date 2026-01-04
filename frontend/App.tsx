@@ -252,20 +252,40 @@ const App: React.FC = () => {
     loadTasks();
   }, []);
 
-  // 数据变化时自动保存
+  // 数据变化时自动保存到本地存储
   useEffect(() => {
-    // 只有在数据加载完成后才保存，避免覆盖本地数据
     if (!isDataLoaded) return;
-
-    const saveTasks = async () => {
-      try {
-        await saveAllTasks(tasks);
-      } catch (error) {
-        console.error('保存任务失败:', error);
-      }
-    };
-    saveTasks();
+    saveAllTasks(tasks).catch(err => console.error('本地保存失败:', err));
   }, [tasks, isDataLoaded]);
+
+  // 核心同步刷新函数：从云端拉取并覆盖本地
+  const refreshTasksFromCloud = useCallback(async () => {
+    if (!user || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const cloudTasks = await getCloudTasks();
+      const convertedTasks: Task[] = cloudTasks.map((ct: TaskResponse) => ({
+        id: ct.id,
+        text: ct.text,
+        details: ct.details || '',
+        startDate: ct.start_date || ct.due_date || '',
+        dueDate: ct.due_date || '',
+        timeframe: calculateTimeframe(ct.due_date || ''),
+        archived: ct.archived,
+        createdAt: ct.created_at ? new Date(ct.created_at).getTime() : Date.now(),
+        selected: false
+      }));
+      setTasks(convertedTasks);
+      if (isIndexedDBAvailable()) {
+        await saveAllTasks(convertedTasks);
+      }
+      console.log('✅ 云端同步完成');
+    } catch (err) {
+      console.error('自动同步失败:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user, isSyncing]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -278,18 +298,20 @@ const App: React.FC = () => {
       const lastCheckedDate = localStorage.getItem('lastSystemDate');
 
       if (lastCheckedDate && lastCheckedDate !== todayStr) {
-        console.log('检测到跨天，正在自动重新校准任务分类...');
+        console.log('检测到跨天，正在自动重新校准并同步云端...');
+        // 1. 本地校准
         setTasks(prev => prev.map(t => ({
           ...t,
           timeframe: calculateTimeframe(t.dueDate)
         })));
-        // 日期变更时，强制将当前视图重置为“今天”
         setCurrentTimeView(TimeView.TODAY);
+        // 2. 触发云端同步，确保获得各端最新状态
+        refreshTasksFromCloud();
       }
       localStorage.setItem('lastSystemDate', todayStr);
     }, 60000); // 每分钟检查一次
     return () => clearInterval(timer);
-  }, [tasks.length]); // 监听列表长度变更以确保引用最新函数
+  }, [tasks.length, refreshTasksFromCloud]); // 监听列表长度变更以确保引用最新函数
 
   // 检测 AI 是否可用
   useEffect(() => {
@@ -478,6 +500,8 @@ const App: React.FC = () => {
         }
 
         await updateCloudTask(id, backendUpdates);
+        // 操作后触发静默同步，保证其他设备也能拿到更新
+        refreshTasksFromCloud();
       } catch (err) {
         console.error('云端更新失败:', err);
       }
@@ -491,6 +515,7 @@ const App: React.FC = () => {
     if (user) {
       try {
         await Promise.all(selectedIds.map(id => updateCloudTask(id, { archived: true })));
+        refreshTasksFromCloud();
       } catch (err) {
         console.error('批量归档失败:', err);
       }
@@ -518,6 +543,7 @@ const App: React.FC = () => {
     if (user) {
       try {
         await Promise.all(selectedIds.map(id => deleteCloudTask(id)));
+        refreshTasksFromCloud();
       } catch (err) {
         console.error('批量删除失败:', err);
       }
@@ -553,6 +579,7 @@ const App: React.FC = () => {
         });
         // 更新本地 ID 为云端生成的 ID
         setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, id: response.id } : t));
+        refreshTasksFromCloud();
       } catch (err) {
         console.error('云端创建失败:', err);
       }
@@ -602,8 +629,13 @@ const App: React.FC = () => {
         archived: ct.archived
       }));
       setTasks(unifiedTasks);
+      // 同时确保存储在本地
+      if (isIndexedDBAvailable()) {
+        await saveAllTasks(unifiedTasks);
+      }
+      console.log('✅ 登录后同步完成');
     } catch (err) {
-      console.error('同步失败:', err);
+      console.error('登录同步失败:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -999,73 +1031,9 @@ const App: React.FC = () => {
         onCreateNew={handleCreateNew}
       />
 
-      {/* 强力调试诊断面板 */}
-      <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 z-[9999] bg-white/95 border-2 border-red-500 p-3 rounded-xl shadow-2xl flex flex-col gap-2 min-w-[280px]">
-        <div className="text-[12px] font-bold text-red-600 flex justify-between items-center border-b pb-1">
-          <span>EasyNote 诊断面板 (V2-TEST-P3)</span>
-          <button
-            onClick={() => window.location.reload()}
-            className="bg-gray-100 px-2 py-0.5 rounded border active:bg-gray-200"
-          >
-            重启 App
-          </button>
-        </div>
-
-        <div className="text-[10px] space-y-1 text-gray-700">
-          <div className="flex justify-between">
-            <span className="font-semibold text-gray-500">我的 UID:</span>
-            <span className="font-mono text-blue-600 select-all">{user?.id || '未登录'}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold text-gray-500">任务总数:</span>
-            <span className="font-bold">{tasks.length} (本地)</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold text-gray-500">同步状态:</span>
-            <span className={`${isSyncing ? 'text-blue-500 animate-pulse' : 'text-green-600'}`}>
-              {isSyncing ? '正在拼命同步...' : '空闲'}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 mt-1">
-          <button
-            onClick={async () => {
-              setIsSyncing(true);
-              try {
-                console.log('🚀 开始强制手动同步...');
-                await syncTasksBatch(tasks, 'merge');
-                const cloud = await getCloudTasks();
-                const converted = cloud.map(ct => ({
-                  id: ct.id,
-                  text: ct.text,
-                  details: ct.details || '',
-                  startDate: ct.start_date || ct.due_date || '',
-                  dueDate: ct.due_date || '',
-                  timeframe: calculateTimeframe(ct.due_date || ''),
-                  archived: ct.archived,
-                  createdAt: new Date(ct.created_at).getTime(),
-                  selected: false
-                }));
-                setTasks(converted);
-                alert('✅ 同步成功！数据已与云端对齐。');
-              } catch (e: any) {
-                console.error('Manual Sync Error:', e);
-                alert('❌ 同步失败：' + (e.message || '未知错误'));
-              } finally {
-                setIsSyncing(false);
-              }
-            }}
-            disabled={!user || isSyncing}
-            className="col-span-2 bg-red-500 text-white text-[12px] py-2 rounded-lg font-bold shadow-md hover:bg-red-600 active:scale-95 disabled:opacity-50"
-          >
-            强制【手动同步】 (合并云端)
-          </button>
-        </div>
-
-        <div className="text-[8px] text-gray-400 text-center mt-1">
-          提示：如果数据不同，请两端各点一次此按钮
-        </div>
+      <div className="fixed bottom-[20px] left-1/2 -translate-x-1/2 text-[10px] text-gray-500 opacity-30 pointer-events-none flex gap-2 z-50 whitespace-nowrap">
+        <span>VER: V2.6-AUTO-SYNC</span>
+        {user && <span>| UID: {user.id.slice(0, 8)}...</span>}
       </div>
     </div>
   );
